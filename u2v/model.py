@@ -6,35 +6,43 @@ import torch.nn.functional as F
 from torch.nn import init
 from numpy.random import RandomState
 from tadat.core.helpers import colstr
+import math
 
 SHUFFLE_SEED=10
 
 class User2Vec(nn.Module):
 
-    def __init__(self, user_id, word_embeddings, outpath, margin=1, initial_lr=0.001, 
-                 epochs=10, device=None):
-        super(User2Vec, self).__init__()        
-        self.user_id = user_id
-        self.outpath = outpath
-        self.E = nn.Embedding.from_pretrained(word_embeddings, freeze=True)
-        self.emb_dimension = word_embeddings.shape[1]
-        self.U = nn.Embedding(1, self.emb_dimension)
-        self.margin = margin
-        initrange = 1.0 / self.emb_dimension
-        init.uniform_(self.U.weight.data, -initrange, initrange)
-        self.initial_lr = initial_lr
-        self.epochs = epochs
+    def __init__(self, user_id, emb_dimension, outpath, margin=10, initial_lr=0.1, 
+                 epochs=10, batch_size=None, device=None):
+        super(User2Vec, self).__init__()     
         if not device:
             device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         self.device = device
         print("[device: {}]".format(self.device))      
+        self.outpath = outpath        
 
-    def forward(self, pos_sample, neg_samples):
+        self.user_id = user_id
+        self.emb_dimension = emb_dimension
+        #user embedding matrix
+        self.U = nn.Embedding(1, self.emb_dimension)
+        initrange = 1.0 / self.emb_dimension
+        #init weights
+        init.uniform_(self.U.weight.data, -initrange, initrange)
+       
+        
+        self.margin = margin
+        self.batch_size = batch_size
+        self.initial_lr = initial_lr
+        self.epochs = epochs
+        
+
+    def forward(self, idxs):
         #content embeddings
-        emb_pos = self.E(pos_sample)        
-        emb_neg = self.E(neg_samples)
-        #user embedding
+        emb_pos = self.positive_samples[idxs]
+        emb_neg = self.negative_samples[idxs]
+         #user embedding
         emb_user = self.U(torch.tensor([0], device=self.device))                
+
         #prediction
         logits = emb_pos @ emb_user.T        
         neg_logits = emb_neg @ emb_user.T
@@ -43,46 +51,57 @@ class User2Vec(nn.Module):
         loss = torch.max(zero_tensor, (self.margin - logits + neg_logits))
         return loss.mean()
     
-    def doc_proba(self, doc):
-        #embeddings
-        emb_doc = self.E(doc)                
+    def doc_proba(self, docs):        
+        #user embedding
         emb_user = self.U(torch.tensor([0], device=self.device))                
         #conditonal word likelihood 
-        logits = emb_doc @ emb_user.T        
+        logits = docs @ emb_user.T        
         probs = torch.sigmoid(logits.squeeze())        
         return torch.mean(probs)        
 
-    def fit(self, pos_samples, neg_samples, val_x):        
-        # ipdb.set_trace()         
+    def fit(self, X_positive, X_negative, X_val):        
         self.to(self.device)
+        assert self.emb_dimension == X_positive.shape[-1]
+        N = X_positive.shape[0]
+        V = X_val.shape[0]        
+        self.positive_samples = X_positive.to(self.device)
+        self.negative_samples = X_negative.to(self.device)
+        self.validation = X_val.to(self.device)
+
         rng = RandomState(SHUFFLE_SEED)       
-        optimizer = optim.Adam(self.parameters(), lr=self.initial_lr)
+        optimizer = optim.Adam(self.parameters(), lr=self.initial_lr)       
 
         val_prob=0
         best_val_prob=0    
         n_val_drops=0   
         MAX_VAL_DROPS=5
         loss_margin = 0.005      
+        if self.batch_size:
+            n_batches = math.ceil(N/self.batch_size)
+        else:
+            n_batches = 1
+            self.batch_size = N
+        
+        train_idx = np.arange(N).reshape(1,-1)
+        
 
         for e in range(self.epochs):        
-            idx = rng.permutation(len(pos_samples))
-            pos_samples_shuff = [pos_samples[i] for i in idx]
-            neg_samples_shuff = [neg_samples[i] for i in idx]           
-            running_loss = 0.0
-            for x, neg_x in zip(pos_samples_shuff, neg_samples_shuff):    
-                x_ = torch.from_numpy(x).long().to(self.device)
-                neg_x_ = torch.tensor(neg_x).long().to(self.device)            
+            train_idx = rng.permutation(N)            
+            running_loss = 0.0        
+            for j in range(n_batches):               
+                #get batches 
+                batch_idx = train_idx[j*self.batch_size:(j+1)*self.batch_size]                   
+                # from ipdb import set_trace; set_trace()
                 optimizer.zero_grad()
-                loss = self.forward(x_, neg_x_ )
+                loss = self.forward(batch_idx)
+                # print(loss.item())
                 loss.backward()
                 optimizer.step()                
                 running_loss += loss.item() 
-            avg_loss = round(running_loss/len(pos_samples),4)
+            avg_loss = round(running_loss/N,4)
             val_prob = 0
-            for v in val_x:
-                v_ = torch.from_numpy(v).long().to(self.device)
-                val_prob += self.doc_proba(v_).item()
-            val_prob = round(val_prob/len(val_x),4)
+            val_prob = round(self.doc_proba(self.validation).item(), 4)
+            # val_prob = val_prob
             status_msg = "epoch: {} | loss: {} | val avg prob: {} ".format(e, avg_loss, val_prob)
             if val_prob > best_val_prob:    
                 n_val_drops=0            

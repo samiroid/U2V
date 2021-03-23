@@ -4,14 +4,14 @@ with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
 
 setuptools.setup(
-    name="user2vec", 
+    name="U2V", 
     version="0.0.1",
     author="Silvio Amir",
     author_email="silvio.aam@gmail.com",
-    description="User2Vec",
+    description="U2V",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/samiroid/user2vec_torch",
+    url="https://github.com/samiroid/U2V",
     classifiers=[
         "Programming Language :: Python :: 3",
         "License :: OSI Approved :: MIT License",
