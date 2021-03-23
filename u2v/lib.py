@@ -171,6 +171,7 @@ def build_data(inpath, outpath, embeddings_path, emb_encoding="latin-1",
 
     print("\n> building negative samples")
     build_negative_samples(pkl_path, n_neg_samples)
+    print("\n> building features")
     build_features(pkl_path)
 
 def save_user(user_id, docs, max_doc_len, rng, outpath, split=0.8):        
@@ -227,6 +228,8 @@ def build_features(inpath):
             np.save(fi, X_negative)
         with open(inpath+"/users/w2v_"+user_id+"_val.npy", "wb") as fi:
             np.save(fi, X_validation)
+        sys.stdout.write("\r> features | user: {}".format(user_id))
+        sys.stdout.flush()
 
 def stich_embeddings(inpath, outpath, emb_dim):
     print("[writing embeddings to {}]".format(outpath))
@@ -239,6 +242,7 @@ def stich_embeddings(inpath, outpath, emb_dim):
             fo.write(l)
 
 def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, reset=False, device=None):
+    print("\ntraining...")
     txt_path = path+"/txt/"    
     if reset:
         shutil.rmtree(txt_path, ignore_errors=True)    
