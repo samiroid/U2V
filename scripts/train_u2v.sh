@@ -8,7 +8,8 @@ python u2v/u2v.py -input $CORPUS -emb $WORD_EMBEDDINGS -output $OUTPUT_PATH \
                         -epochs 20 \
                         -neg_samples 2 \
                         -margin 5 \
-                        -train
+                        -train \
+                        -reset
                         # -build \
                         # -train
                         

@@ -19,30 +19,26 @@ class User2Vec(nn.Module):
             device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         self.device = device
         print("[device: {}]".format(self.device))      
-        self.outpath = outpath        
-
+        self.outpath = outpath     
         self.user_id = user_id
+        self.margin = margin
+        self.batch_size = batch_size
+        self.initial_lr = initial_lr
+        self.epochs = epochs
+                
         self.emb_dimension = emb_dimension
         #user embedding matrix
         self.U = nn.Embedding(1, self.emb_dimension)
         initrange = 1.0 / self.emb_dimension
         #init weights
         init.uniform_(self.U.weight.data, -initrange, initrange)
-       
-        
-        self.margin = margin
-        self.batch_size = batch_size
-        self.initial_lr = initial_lr
-        self.epochs = epochs
-        
 
     def forward(self, idxs):
         #content embeddings
         emb_pos = self.positive_samples[idxs]
         emb_neg = self.negative_samples[idxs]
          #user embedding
-        emb_user = self.U(torch.tensor([0], device=self.device))                
-
+        emb_user = self.U(torch.tensor([0], device=self.device))  
         #prediction
         logits = emb_pos @ emb_user.T        
         neg_logits = emb_neg @ emb_user.T
@@ -52,54 +48,50 @@ class User2Vec(nn.Module):
         return loss.mean()
     
     def doc_proba(self, docs):        
-        #user embedding
-        emb_user = self.U(torch.tensor([0], device=self.device))                
-        #conditonal word likelihood 
-        logits = docs @ emb_user.T        
-        probs = torch.sigmoid(logits.squeeze())        
+        with torch.no_grad():
+            #user embedding
+            emb_user = self.U(torch.tensor([0], device=self.device))                
+            #conditonal word likelihood 
+            logits = docs @ emb_user.T        
+            probs = torch.sigmoid(logits.squeeze())        
         return torch.mean(probs)        
 
     def fit(self, X_positive, X_negative, X_val):        
-        self.to(self.device)
         assert self.emb_dimension == X_positive.shape[-1]
-        N = X_positive.shape[0]
-        V = X_val.shape[0]        
+        N = X_positive.shape[0]       
+        #to device
+        self.to(self.device)
         self.positive_samples = X_positive.to(self.device)
         self.negative_samples = X_negative.to(self.device)
         self.validation = X_val.to(self.device)
 
-        rng = RandomState(SHUFFLE_SEED)       
         optimizer = optim.Adam(self.parameters(), lr=self.initial_lr)       
 
-        val_prob=0
-        best_val_prob=0    
-        n_val_drops=0   
-        MAX_VAL_DROPS=5
-        loss_margin = 0.005      
         if self.batch_size:
             n_batches = math.ceil(N/self.batch_size)
         else:
             n_batches = 1
             self.batch_size = N
         
-        train_idx = np.arange(N).reshape(1,-1)
-        
-
+        rng = RandomState(SHUFFLE_SEED)       
+        val_prob=0
+        best_val_prob=0    
+        n_val_drops=0   
+        MAX_VAL_DROPS=5
+        loss_margin = 0.005      
+        # train_idx = np.arange(N).reshape(1,-1)        
         for e in range(self.epochs):        
             train_idx = rng.permutation(N)            
             running_loss = 0.0        
             for j in range(n_batches):               
                 #get batches 
                 batch_idx = train_idx[j*self.batch_size:(j+1)*self.batch_size]                   
-                # from ipdb import set_trace; set_trace()
                 optimizer.zero_grad()
-                loss = self.forward(batch_idx)
-                # print(loss.item())
+                loss = self.forward(batch_idx)                
                 loss.backward()
                 optimizer.step()                
                 running_loss += loss.item() 
-            avg_loss = round(running_loss/N,4)
-            val_prob = 0
+            avg_loss = round(running_loss/N,4)            
             val_prob = round(self.doc_proba(self.validation).item(), 4)
             # val_prob = val_prob
             status_msg = "epoch: {} | loss: {} | val avg prob: {} ".format(e, avg_loss, val_prob)

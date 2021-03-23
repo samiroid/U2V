@@ -229,8 +229,8 @@ def build_features(inpath):
             np.save(fi, X_validation)
 
 def stich_embeddings(inpath, outpath, emb_dim):
-    print("[writing embeddings to {}]".format(outpath+"U.txt"))
-    with open(outpath+"U.txt","w") as fo:    
+    print("[writing embeddings to {}]".format(outpath))
+    with open(outpath,"w") as fo:    
         user_embeddings = list(Path(inpath).iterdir())
         fo.write("{}\t{}\n".format(len(user_embeddings), emb_dim))
         for u in user_embeddings:
@@ -241,24 +241,16 @@ def stich_embeddings(inpath, outpath, emb_dim):
 def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, reset=False, device=None):
     txt_path = path+"/txt/"    
     if reset:
-        shutil.rmtree(txt_path, ignore_errors=True)
-    
+        shutil.rmtree(txt_path, ignore_errors=True)    
     if not os.path.exists(os.path.dirname(txt_path)):
-        os.makedirs(os.path.dirname(txt_path))   
-        
-    # E = np.load(path+"/pkl/word_emb.npy")    
-    # E = torch.from_numpy(E.astype(np.float32))     
-    
+        os.makedirs(os.path.dirname(txt_path))       
     with open(path+"/pkl/users.txt") as fi:
         users = [u.replace("\n","") for u in fi.readlines()]
-
-    print(users)
-    # user_data = list(Path(path+"/pkl/users/").iterdir())
+    
     random.shuffle(users)
     cache = set([os.path.basename(f).replace(".txt","") for f in Path(txt_path).iterdir()])
-    print(cache)
-    for j, user in enumerate(users):
-    #     user = os.path.basename(user_fname) 
+    emb_dim = None
+    for user in users:    
         if user in cache:
             print("cached embedding: {}".format(user))
             continue
@@ -275,10 +267,11 @@ def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, rese
         
         print("{} | tr: {} | ts: {}".format(user, pos_samples.shape[0], val_samples.shape[0]))
         emb_dim = pos_samples.shape[-1]
-        f = model.User2Vec(user, emb_dim, txt_path, margin=1, initial_lr=10, epochs=20, device=device, batch_size=5)   
+        f = model.User2Vec(user, emb_dim, txt_path, margin=1, initial_lr=10, epochs=20, device=device, batch_size=100)   
         f.fit(pos_samples, neg_samples, val_samples)
         # break
-    stich_embeddings(txt_path, path, emb_dim)
+    if emb_dim:
+        stich_embeddings(txt_path, path+"{}_U.txt".format(encoder), emb_dim)
 
 
 # def train_model(path,  epochs=20, initial_lr=0.001, margin=1, reset=False, device=None):
