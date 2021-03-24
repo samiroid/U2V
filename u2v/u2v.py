@@ -19,7 +19,7 @@ def cmdline_args():
     parser.add_argument('-reset', action="store_true", help='reset embeddings that were already computed')
     parser.add_argument('-train', action="store_true", help='train mode (assumes data was already extracted)')
     parser.add_argument('-build', action="store_true", help='build training data (does not train)')
-    parser.add_argument('-device', choices=["cpu","cuda","auto"], default="auto", help='device')
+    parser.add_argument('-device', type=str, default="auto", help='device')
     return parser.parse_args()	
 
 if __name__ == "__main__" :    
