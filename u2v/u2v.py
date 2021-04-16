@@ -1,6 +1,6 @@
 import argparse
 import os
-from lib import build_data, train_model
+from lib import build_data, build_features, train_model
 import torch 
 
 def cmdline_args():
@@ -19,6 +19,9 @@ def cmdline_args():
     parser.add_argument('-reset', action="store_true", help='reset embeddings that were already computed')
     parser.add_argument('-train', action="store_true", help='train mode (assumes data was already extracted)')
     parser.add_argument('-build', action="store_true", help='build training data (does not train)')
+    parser.add_argument('-encode', action="store_true", help='encode training data (does not train)')
+    parser.add_argument('-reset_cache', action="store_true", help='reset cached users (i.e. all are trained)')
+    parser.add_argument('-features', choices=["w2v"], default="w2v", help="feature type")
     parser.add_argument('-device', type=str, default="auto", help='device')
     return parser.parse_args()	
 
@@ -35,13 +38,18 @@ if __name__ == "__main__" :
                                         args.reset,
                                         args.device))   
 
-    if (not args.train) or args.build:
+    if (not args.train and not args.encode) or args.build:
         print("> prepare data")
         build_data(args.input, args.output, args.emb, emb_encoding="latin-1", 
                     min_word_freq=args.min_word_freq, max_vocab_size=None, 
                     random_seed=args.seed, n_neg_samples=args.neg_samples, 
                     min_docs_user=args.min_docs_user, reset=args.reset)
-    if not args.build:
+    
+    if (not args.train and not args.build) or args.encode:
+        print("> encode data")
+        build_features(args.output, args.features)
+
+    if (not args.build and not args.encode) or args.train:
         device = None
         if args.device == "auto":
             device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
@@ -50,5 +58,5 @@ if __name__ == "__main__" :
         print("> train")
         train_model(args.output, epochs=args.epochs, initial_lr=args.lr, 
                     margin=args.margin,
-                    reset=args.reset,
+                    reset=args.reset_cache,
                     device=device)

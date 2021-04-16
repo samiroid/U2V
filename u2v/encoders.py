@@ -22,7 +22,8 @@ def BOW_encoder(docs, args):
     elif weights == "frequency":
         X = core.features.BOW_freq(docs, vocab_size, sparse=sparse)
 
-def word2vec_encoder(docs, max_doc_size, agg, E):    
+def word2vec_agg_encoder(docs, agg, E):    
+    raise NotImplementedError
     n_docs = len(docs)
     emb_size = E.shape[0]    
     #+1 for an extra embedding for the entire sentence (the first position)
@@ -41,6 +42,24 @@ def word2vec_encoder(docs, max_doc_size, agg, E):
             sentence_embedding = word_embeddings.sum(axis=0)    
             X[i, 0] = sentence_embedding
             X[i, 1:] = word_embeddings
+    else:
+        raise NotImplementedError
+    return X
+
+def word2vec_encoder(docs, E):    
+
+    n_docs = len(docs)
+    emb_size = E.shape[0]    
+    #+1 for an extra embedding for the entire sentence (the first position)
+    X = np.zeros((n_docs, emb_size))    
+    for i,doc in enumerate(docs):        
+        word_embeddings = E[:, docs].T
+        sentence_embedding = word_embeddings.sum(axis=0)    
+        # from ipdb import set_trace; set_trace()
+        doc_len = word_embeddings.shape[0]
+        X[i, 0] = sentence_embedding
+        X[i, 1:(1+doc_len)] = word_embeddings
+    
     else:
         raise NotImplementedError
     return X

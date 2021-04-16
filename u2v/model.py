@@ -7,7 +7,7 @@ from torch.nn import init
 from numpy.random import RandomState
 from tadat.core.helpers import colstr
 import math
-
+import sys
 SHUFFLE_SEED=10
 
 class User2Vec(nn.Module):
@@ -33,10 +33,10 @@ class User2Vec(nn.Module):
         #init weights
         init.uniform_(self.U.weight.data, -initrange, initrange)
 
-    def forward(self, idxs):
+    def forward(self, emb_pos, emb_neg):
         #content embeddings
-        emb_pos = self.positive_samples[idxs]
-        emb_neg = self.negative_samples[idxs]
+        # emb_pos = self.positive_samples[idxs]
+        # emb_neg = self.negative_samples[idxs]
          #user embedding
         emb_user = self.U(torch.tensor([0], device=self.device))  
         #prediction
@@ -57,22 +57,18 @@ class User2Vec(nn.Module):
         return torch.mean(probs)        
 
     def fit(self, X_positive, X_negative, X_val):        
-        assert self.emb_dimension == X_positive.shape[-1]
-        N = X_positive.shape[0]       
+        batches = X_positive.files
+        assert self.emb_dimension == X_positive[batches[0]].shape[1]
+        N  = X_positive[batches[0]].shape[0] * len(batches)
+        n_val = X_val.shape[0]
+        print("{} | tr: {} | ts: {}".format(self.user_id, N, n_val))
+        
         #to device
         self.to(self.device)
-        self.positive_samples = X_positive.to(self.device)
-        self.negative_samples = X_negative.to(self.device)
-        self.validation = X_val.to(self.device)
+        self.validation = torch.from_numpy(X_val.astype(np.float32)).to(self.device)     
+        
 
         optimizer = optim.Adam(self.parameters(), lr=self.initial_lr)       
-
-        if self.batch_size:
-            n_batches = math.ceil(N/self.batch_size)
-        else:
-            n_batches = 1
-            self.batch_size = N
-        
         rng = RandomState(SHUFFLE_SEED)       
         val_prob=0
         best_val_prob=0    
@@ -81,18 +77,25 @@ class User2Vec(nn.Module):
         loss_margin = 0.005      
         # train_idx = np.arange(N).reshape(1,-1)        
         for e in range(self.epochs):        
-            train_idx = rng.permutation(N)            
-            running_loss = 0.0        
-            for j in range(n_batches):               
+            # train_idx = rng.permutation(N)            
+            running_loss = 0.0       
+            rng.shuffle(batches)
+            for batch in batches:
+                # sys.stdout.write(f"\r> batch {batch}")
+                # sys.stdout.flush()          
                 #get batches 
-                batch_idx = train_idx[j*self.batch_size:(j+1)*self.batch_size]                   
+                pos_batch = torch.from_numpy(X_positive[batch].astype(np.float32)).to(self.device)     
+                neg_batch = torch.from_numpy(X_negative[batch].astype(np.float32)).to(self.device)     
+                # pos_batch = pos_batch
+                # neg_batch = neg_batch
+                # batch_idx = train_idx[j*self.batch_size:(j+1)*self.batch_size]                   
                 optimizer.zero_grad()
-                loss = self.forward(batch_idx)                
+                loss = self.forward(pos_batch, neg_batch)                
                 loss.backward()
                 optimizer.step()                
                 running_loss += loss.item() 
-            avg_loss = round(running_loss/N,4)            
-            val_prob = round(self.doc_proba(self.validation).item(), 4)
+            avg_loss = round(running_loss/N,3)            
+            val_prob = round(self.doc_proba(self.validation).item(), 3)
             # val_prob = val_prob
             status_msg = "epoch: {} | loss: {} | val avg prob: {} ".format(e, avg_loss, val_prob)
             if val_prob > best_val_prob:    

@@ -1,22 +1,25 @@
 import argparse
-# import codecs
-from collections import Counter
 # from ipdb import set_trace
 import glob
-from pathlib import Path
 import os
 import pickle
 import random
 import shutil
 import sys
-
+# import codecs
+from collections import Counter
+from pathlib import Path
+import math
 import numpy as np
 import torch
 from tadat.core import embeddings
-import model 
-import encoders 
+
+import encoders
+import model
+
 MIN_DOC_LEN=2
 MIN_DOCS = 2
+DEFAULT_BLOCK_SIZE=256
 
 class NegativeSampler():
 
@@ -141,8 +144,8 @@ def build_data(inpath, outpath, embeddings_path, emb_encoding="latin-1",
             #if we reach a new user, save the current one
             if user!= curr_user:
                 if len(user_docs) >= min_docs_user:
-                    max_doc_len = max(doc_lens)
-                    save_user(curr_user, user_docs, max_doc_len, rng, users_path)
+                    # max_doc_len = max(doc_lens)
+                    save_user(curr_user, user_docs, doc_lens, rng, users_path)
                     users.append(curr_user)
                 else:
                     print("> IGNORED user: {}  ({})".format(user,len(user_docs)))
@@ -159,22 +162,20 @@ def build_data(inpath, outpath, embeddings_path, emb_encoding="latin-1",
             doc_lens.append(doc_len)
         #save last user
         if len(user_docs) >= min_docs_user:
-            max_doc_len = max(doc_lens)
-            save_user(curr_user, user_docs, max_doc_len,  rng, users_path)
+            # max_doc_len = max(doc_lens)
+            save_user(curr_user, user_docs, doc_lens,  rng, users_path)
             users.append(curr_user)
         else:
-            print("> IGNORED user: {}  ({})".format(user,len(user_docs)))
-    
-
+            print("> IGNORED user: {}  ({})".format(user,len(user_docs)))    
+    print()
     with open(pkl_path+"users.txt","w") as fo:
         fo.write("\n".join(users))
-
-    print("\n> building negative samples")
+    
     build_negative_samples(pkl_path, n_neg_samples)
-    print("\n> building features")
-    build_features(pkl_path)
+    
+    
 
-def save_user(user_id, docs, max_doc_len, rng, outpath, split=0.8):        
+def save_user(user_id, docs, doc_lens, rng, outpath, split=0.8):        
     sys.stdout.write("\r> saving user: {}  ({})".format(user_id,len(docs)))
     sys.stdout.flush()
     #shuffle the data
@@ -186,15 +187,16 @@ def save_user(user_id, docs, max_doc_len, rng, outpath, split=0.8):
     docs_val = docs_shuf[split_idx:]
     
     with open(outpath+"temp_"+user_id, "wb") as fo:        
-        pickle.dump([user_id, max_doc_len, docs_train, docs_val], fo)
+        pickle.dump([user_id, doc_lens, docs_train, docs_val], fo)
 
 def build_negative_samples(inpath, n_samples):
+    print("\n> building negative samples")
     with open(inpath+"vocab.pkl", "rb") as fi:        
             vocab, word_counts = pickle.load(fi)        
     sampler = NegativeSampler(vocab, word_counts, warp=0.75)
     for tmp_user_path in glob.glob(inpath+"/users/temp_*"):
         with open(tmp_user_path, "rb") as fi:
-            user_id, max_doc_len, docs_train, docs_val = pickle.load(fi)
+            user_id, doc_lens, docs_train, docs_val = pickle.load(fi)
         pos_samples = []
         neg_samples = []                
         for x in docs_train:                    
@@ -208,26 +210,68 @@ def build_negative_samples(inpath, n_samples):
         sys.stdout.flush()
         
         with open(inpath+"users/idx_"+user_id, "wb") as fo:        
-            pickle.dump([user_id, max_doc_len, pos_samples, docs_val, neg_samples], fo)
+            pickle.dump([user_id, doc_lens, pos_samples, docs_val, neg_samples], fo)
         os.remove(tmp_user_path)
+    print()
 
-def build_features(inpath):
+def build_features(inpath, feature_type="w2v", block_size=DEFAULT_BLOCK_SIZE):
+    """
+        save features in blocks of block_size 
+    """
+    inpath=inpath+"pkl/"
+    print("\n> building features")
     with open(inpath+"vocab.pkl", "rb") as fi:        
         vocab, word_counts = pickle.load(fi)        
     with open(inpath+"word_emb.npy", "rb") as f:
         E = np.load(f)    
+    outpath= f"{inpath}/users/{feature_type}/"
+
+    if not os.path.exists(os.path.dirname(outpath)):
+        os.makedirs(os.path.dirname(outpath))   
+    
     for user_path in glob.glob(inpath+"/users/idx_*"):
         with open(user_path, "rb") as fi:
-            user_id, max_doc_len, positive, validation, negative = pickle.load(fi)                
-        X_positive = encoders.word2vec_encoder(positive, max_doc_len, "bin", E)
-        X_negative = encoders.word2vec_encoder(negative, max_doc_len, "bin", E)
-        X_validation = encoders.word2vec_encoder(validation, max_doc_len, "bin", E)
-        with open(inpath+"/users/w2v_"+user_id+"_pos.npy", "wb") as fi:
-            np.save(fi, X_positive)
-        with open(inpath+"/users/w2v_"+user_id+"_neg.npy", "wb") as fi:
-            np.save(fi, X_negative)
-        with open(inpath+"/users/w2v_"+user_id+"_val.npy", "wb") as fi:
+            user_id, doc_lens, positive, validation, negative = pickle.load(fi) 
+        #concatenate all documents into a  single vector
+        positive = np.concatenate(positive, axis=None)
+        negative = np.concatenate(negative, axis=None)
+        validation = np.concatenate(validation, axis=None)
+        #validation data goes into a single block
+        X_validation = E[:, validation].T 
+        with open(outpath+f"/{user_id}_val.npy", "wb") as fi:
             np.save(fi, X_validation)
+        n_blocks = math.ceil(len(positive)/block_size)        
+        for label, data in zip(["pos","neg"],[positive, negative]):
+            blocks = []
+            for i in range(n_blocks):
+                block = data[i*block_size:(i+1)*block_size]                
+                E_block = E[:, block].T
+                blocks.append(E_block)
+            # from ipdb import set_trace; set_trace()
+            with open(outpath+f"/{user_id}_{label}.npy", "wb") as fi:
+                np.savez(fi, *blocks)
+        
+        
+        # X_positive = E[:, positive].T
+        # X_negative = E[:, negative].T
+        # with open(outpath+f"/{user_id}_pos.npy", "wb") as fi:
+        #     np.save(fi, X_positive)
+        # with open(outpath+f"/{user_id}_neg.npy", "wb") as fi:
+        #     np.save(fi, X_negative)
+        # with open(outpath+f"/{user_id}_neg#{i}.npy", "wb") as fi:
+        #     np.save(fi, X_negative)
+        
+        # for i in range(n_blocks):
+        #     positive_block = positive[i*block_size:(i+1)*block_size]
+        #     negative_block = negative[i*block_size:(i+1)*block_size]
+        #     X_positive = E[:, positive_block].T
+        #     X_negative = E[:, negative_block].T
+        #     # from ipdb import set_trace; set_trace()
+        #     with open(outpath+f"/{user_id}_pos#{i}.npy", "wb") as fi:
+        #         np.save(fi, X_positive)
+        #     with open(outpath+f"/{user_id}_neg#{i}.npy", "wb") as fi:
+        #         np.save(fi, X_negative)
+
         sys.stdout.write("\r> features | user: {}".format(user_id))
         sys.stdout.flush()
 
@@ -243,7 +287,7 @@ def stich_embeddings(inpath, outpath, emb_dim):
 
 def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, reset=False, device=None):
     print("\ntraining...")
-    txt_path = path+"/txt/"    
+    txt_path = f"{path}/txt/{encoder}/"
     if reset:
         shutil.rmtree(txt_path, ignore_errors=True)    
     if not os.path.exists(os.path.dirname(txt_path)):
@@ -258,25 +302,69 @@ def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, rese
         if user in cache:
             print("cached embedding: {}".format(user))
             continue
-        user_fname = "{}/pkl/users/{}_{}_{}.npy" 
-        with open(user_fname.format(path, encoder, user, "pos"), "rb") as fi:
-            pos_samples = np.load(fi)
-            pos_samples = torch.from_numpy(pos_samples.astype(np.float32))     
-        with open(user_fname.format(path, encoder, user, "neg"), "rb") as fi:
-            neg_samples = np.load(fi)
-            neg_samples = torch.from_numpy(neg_samples.astype(np.float32))     
-        with open(user_fname.format(path, encoder, user, "val"), "rb") as fi:
-            val_samples = np.load(fi)
-            val_samples = torch.from_numpy(val_samples.astype(np.float32))     
-        
-        print("{} | tr: {} | ts: {}".format(user, pos_samples.shape[0], val_samples.shape[0]))
-        emb_dim = pos_samples.shape[-1]
+        user_fname = "{}/pkl/users/{}/{}_{}.npy" 
+
+        f_pos = open(user_fname.format(path, encoder, user, "pos"), "rb")
+        pos_samples = np.load(f_pos, allow_pickle=True)            
+        f_neg = open(user_fname.format(path, encoder, user, "neg"), "rb")
+        neg_samples = np.load(f_neg, allow_pickle=True)
+        f_val = open(user_fname.format(path, encoder, user, "val"), "rb")
+        val_samples = np.load(f_val, allow_pickle=True)        
+        emb_dim = val_samples.shape[1]        
         f = model.User2Vec(user, emb_dim, txt_path, margin=1, initial_lr=10, epochs=20, device=device, batch_size=100)   
         f.fit(pos_samples, neg_samples, val_samples)
         # break
+        f_pos.close()
+        f_neg.close()
+        f_val.close()
     if emb_dim:
         stich_embeddings(txt_path, path+"{}_U.txt".format(encoder), emb_dim)
 
+        # print(batches)        
+        # print(pos_samples[batches[0]])
+        
+        
+            # pos_samples = torch.from_numpy(pos_samples.astype(np.float32))     
+        #     neg_samples = torch.from_numpy(neg_samples.astype(np.float32))     
+        #     val_samples = torch.from_numpy(val_samples.astype(np.float32))     
+
+
+
+# def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, reset=False, device=None):
+#     print("\ntraining...")
+#     txt_path = path+"/txt/"    
+#     if reset:
+#         shutil.rmtree(txt_path, ignore_errors=True)    
+#     if not os.path.exists(os.path.dirname(txt_path)):
+#         os.makedirs(os.path.dirname(txt_path))       
+#     with open(path+"/pkl/users.txt") as fi:
+#         users = [u.replace("\n","") for u in fi.readlines()]
+    
+#     random.shuffle(users)
+#     cache = set([os.path.basename(f).replace(".txt","") for f in Path(txt_path).iterdir()])
+#     emb_dim = None
+#     for user in users:    
+#         if user in cache:
+#             print("cached embedding: {}".format(user))
+#             continue
+#         user_fname = "{}/pkl/users/{}_{}_{}.npy" 
+#         with open(user_fname.format(path, encoder, user, "pos"), "rb") as fi:
+#             pos_samples = np.load(fi)
+#             pos_samples = torch.from_numpy(pos_samples.astype(np.float32))     
+#         with open(user_fname.format(path, encoder, user, "neg"), "rb") as fi:
+#             neg_samples = np.load(fi)
+#             neg_samples = torch.from_numpy(neg_samples.astype(np.float32))     
+#         with open(user_fname.format(path, encoder, user, "val"), "rb") as fi:
+#             val_samples = np.load(fi)
+#             val_samples = torch.from_numpy(val_samples.astype(np.float32))     
+        
+#         print("{} | tr: {} | ts: {}".format(user, pos_samples.shape[0], val_samples.shape[0]))
+#         emb_dim = pos_samples.shape[-1]
+#         f = model.User2Vec(user, emb_dim, txt_path, margin=1, initial_lr=10, epochs=20, device=device, batch_size=100)   
+#         f.fit(pos_samples, neg_samples, val_samples)
+#         # break
+#     if emb_dim:
+#         stich_embeddings(txt_path, path+"{}_U.txt".format(encoder), emb_dim)
 
 # def train_model(path,  epochs=20, initial_lr=0.001, margin=1, reset=False, device=None):
 #     txt_path = path+"/txt/"    
