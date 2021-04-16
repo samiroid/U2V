@@ -19,7 +19,7 @@ import model
 
 MIN_DOC_LEN=2
 MIN_DOCS = 2
-DEFAULT_BLOCK_SIZE=256
+DEFAULT_BLOCK_SIZE=512
 
 class NegativeSampler():
 
