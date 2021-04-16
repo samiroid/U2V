@@ -311,7 +311,7 @@ def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, rese
         f_val = open(user_fname.format(path, encoder, user, "val"), "rb")
         val_samples = np.load(f_val, allow_pickle=True)        
         emb_dim = val_samples.shape[1]        
-        f = model.User2Vec(user, emb_dim, txt_path, margin=1, initial_lr=10, epochs=20, device=device, batch_size=100)   
+        f = model.User2Vec(user, emb_dim, txt_path, margin=margin, initial_lr=initial_lr, epochs=epochs, device=device, batch_size=100)   
         f.fit(pos_samples, neg_samples, val_samples)
         # break
         f_pos.close()
