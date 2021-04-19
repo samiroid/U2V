@@ -1,6 +1,6 @@
 import argparse
 import os
-from lib import build_data, build_features, train_model
+from lib import build_data, train_model, encode_users
 import torch 
 
 def cmdline_args():
@@ -21,7 +21,7 @@ def cmdline_args():
     parser.add_argument('-build', action="store_true", help='build training data (does not train)')
     parser.add_argument('-encode', action="store_true", help='encode training data (does not train)')
     parser.add_argument('-reset_cache', action="store_true", help='reset cached users (i.e. all are trained)')
-    parser.add_argument('-features', choices=["w2v"], default="w2v", help="feature type")
+    parser.add_argument('-encoder_type', choices=["w2v","bert"], default="w2v", help="encoder type")
     parser.add_argument('-device', type=str, default="auto", help='device')
     return parser.parse_args()	
 
@@ -40,14 +40,13 @@ if __name__ == "__main__" :
 
     if (not args.train and not args.encode) or args.build:
         print("> prepare data")
-        build_data(args.input, args.output, args.emb, emb_encoding="latin-1", 
-                    min_word_freq=args.min_word_freq, max_vocab_size=None, 
-                    random_seed=args.seed, n_neg_samples=args.neg_samples, 
-                    min_docs_user=args.min_docs_user, reset=args.reset)
+        build_data(args.input, args.output, args.encoder_type, args.emb, emb_encoding="latin-1", min_word_freq=args.min_word_freq, max_vocab_size=None, random_seed=args.seed, min_docs_user=args.min_docs_user, reset=args.reset)
     
     if (not args.train and not args.build) or args.encode:
         print("> encode data")
-        build_features(args.output, args.features)
+        encode_users(args.output, args.encoder_type)
+        # if args.encoder_type == "w2v":
+        #     word2vec_features(args.output)
 
     if (not args.build and not args.encode) or args.train:
         device = None

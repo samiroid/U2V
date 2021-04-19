@@ -8,6 +8,7 @@ from numpy.random import RandomState
 from tadat.core.helpers import colstr
 import math
 import sys
+import time
 SHUFFLE_SEED=10
 
 class User2Vec(nn.Module):
@@ -56,46 +57,54 @@ class User2Vec(nn.Module):
             probs = torch.sigmoid(logits.squeeze())        
         return torch.mean(probs)        
 
+    def get_batch(self, blocks, files):
+        batch = []
+        for f in files:
+            batch.append(blocks[f])
+        batch = np.vstack(batch)   
+        batch = torch.from_numpy(batch.astype(np.float32))
+        return batch
+
     def fit(self, X_positive, X_negative, X_val):        
-        batches = X_positive.files
-        assert self.emb_dimension == X_positive[batches[0]].shape[1]
-        N  = X_positive[batches[0]].shape[0] * len(batches)
+        st = time.time()
+        docs = X_positive.files
+        assert self.emb_dimension == X_positive[docs[0]].shape[1]
+        n_docs = len(docs)
+        N  = X_positive[docs[0]].shape[0] * n_docs
         n_val = X_val.shape[0]
-        print("{} | tr: {} | ts: {}".format(self.user_id, N, n_val))
-        
+        print("{} | tr: {} ({}) | val: {}".format(self.user_id, N, n_docs,  n_val))        
         #to device
         self.to(self.device)
-        self.validation = torch.from_numpy(X_val.astype(np.float32)).to(self.device)     
-        
-
+        validation = torch.from_numpy(X_val.astype(np.float32)).to(self.device)   
         optimizer = optim.Adam(self.parameters(), lr=self.initial_lr)       
         rng = RandomState(SHUFFLE_SEED)       
         val_prob=0
         best_val_prob=0    
         n_val_drops=0   
         MAX_VAL_DROPS=5
-        loss_margin = 0.005      
-        # train_idx = np.arange(N).reshape(1,-1)        
-        for e in range(self.epochs):        
-            # train_idx = rng.permutation(N)            
+        loss_margin = 0.005         
+        n_batches = math.ceil(n_docs/self.batch_size)
+        for e in range(self.epochs):                    
             running_loss = 0.0       
-            rng.shuffle(batches)
-            for batch in batches:
-                # sys.stdout.write(f"\r> batch {batch}")
-                # sys.stdout.flush()          
+            rng.shuffle(docs)
+            for i in range(n_batches):                
                 #get batches 
-                pos_batch = torch.from_numpy(X_positive[batch].astype(np.float32)).to(self.device)     
-                neg_batch = torch.from_numpy(X_negative[batch].astype(np.float32)).to(self.device)     
-                # pos_batch = pos_batch
-                # neg_batch = neg_batch
-                # batch_idx = train_idx[j*self.batch_size:(j+1)*self.batch_size]                   
+                batch = docs[i*self.batch_size:(i+1)*self.batch_size]
+                # print(batch)
+                # from pdb import set_trace; set_trace()
+                # pos_batch = torch.from_numpy(X_positive[doc].astype(np.float32)).to(self.device)     
+                # neg_batch = torch.from_numpy(X_negative[doc].astype(np.float32)).to(self.device)                     
+                pos_batch = self.get_batch(X_positive,batch).to(self.device)
+                neg_batch = self.get_batch(X_negative,batch).to(self.device)
+                # neg_batch = torch.from_numpy(X_negative[batch].astype(np.float32)).to(self.device)                     
+
                 optimizer.zero_grad()
                 loss = self.forward(pos_batch, neg_batch)                
                 loss.backward()
                 optimizer.step()                
                 running_loss += loss.item() 
-            avg_loss = round(running_loss/N,3)            
-            val_prob = round(self.doc_proba(self.validation).item(), 3)
+            avg_loss = round(running_loss/N,4)            
+            val_prob = round(self.doc_proba(validation).item(), 4)
             # val_prob = val_prob
             status_msg = "epoch: {} | loss: {} | val avg prob: {} ".format(e, avg_loss, val_prob)
             if val_prob > best_val_prob:    
@@ -110,6 +119,63 @@ class User2Vec(nn.Module):
                     break
                 status_msg = colstr(status_msg, "red")            
             print(status_msg)                
+        ft = time.time()
+        et = ft - st
+        print(f"time: {round(et,3)}")
+    
+    # def fit(self, X_positive, X_negative, X_val):        
+    #     st = time.time()
+    #     batches = X_positive.files
+    #     assert self.emb_dimension == X_positive[batches[0]].shape[1]
+    #     n_batches = len(batches)
+    #     N  = X_positive[batches[0]].shape[0] * n_batches
+    #     n_val = X_val.shape[0]
+    #     print("{} | tr: {} ({}) | val: {}".format(self.user_id, N, n_batches,  n_val))        
+    #     #to device
+    #     self.to(self.device)
+    #     validation = torch.from_numpy(X_val.astype(np.float32)).to(self.device)   
+    #     optimizer = optim.Adam(self.parameters(), lr=self.initial_lr)       
+    #     rng = RandomState(SHUFFLE_SEED)       
+    #     val_prob=0
+    #     best_val_prob=0    
+    #     n_val_drops=0   
+    #     MAX_VAL_DROPS=5
+    #     loss_margin = 0.005              
+    #     for e in range(self.epochs):                    
+    #         running_loss = 0.0       
+    #         rng.shuffle(batches)
+    #         for batch in batches:                
+    #             #get batches 
+    #             pos_batch = torch.from_numpy(X_positive[batch].astype(np.float32)).to(self.device)     
+    #             neg_batch = torch.from_numpy(X_negative[batch].astype(np.float32)).to(self.device)                     
+    #             # pos_batch = self.get_batch(X_positive,[batch]).to(self.device)
+    #             # neg_batch = self.get_batch(X_negative,[batch]).to(self.device)
+    #             # neg_batch = torch.from_numpy(X_negative[batch].astype(np.float32)).to(self.device)                     
+
+    #             optimizer.zero_grad()
+    #             loss = self.forward(pos_batch, neg_batch)                
+    #             loss.backward()
+    #             optimizer.step()                
+    #             running_loss += loss.item() 
+    #         avg_loss = round(running_loss/N,4)            
+    #         val_prob = round(self.doc_proba(validation).item(), 4)
+    #         # val_prob = val_prob
+    #         status_msg = "epoch: {} | loss: {} | val avg prob: {} ".format(e, avg_loss, val_prob)
+    #         if val_prob > best_val_prob:    
+    #             n_val_drops=0            
+    #             best_val_prob = val_prob
+    #             self.save_embedding()                
+    #             status_msg = colstr(status_msg, "green")
+    #         elif val_prob < (best_val_prob - loss_margin):                
+    #             n_val_drops+=1
+    #             if n_val_drops == MAX_VAL_DROPS:
+    #                 print("[early stopping: {} epochs]".format(e))
+    #                 break
+    #             status_msg = colstr(status_msg, "red")            
+    #         print(status_msg)                
+    #     ft = time.time()
+    #     et = ft - st
+    #     print(f"time: {round(et,3)}")
 
     def save_embedding(self): 
         with open(self.outpath+self.user_id+".txt","w") as fo:

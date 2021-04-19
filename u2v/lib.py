@@ -1,180 +1,46 @@
-import argparse
-# from ipdb import set_trace
-import glob
+import lib_static
+import lib_context
+
+# import argparse
+# # from ipdb import set_trace
+# import glob
 import os
 import pickle
 import random
 import shutil
 import sys
-# import codecs
-from collections import Counter
+# # import codecs
+# from collections import Counter
 from pathlib import Path
-import math
+# import math
 import numpy as np
-import torch
-from tadat.core import embeddings
+from numpy.random import RandomState
+import time
+from model import User2Vec
 
-import encoders
-import model
+DEFAULT_BLOCK_SIZE=64
+SHUFFLE_SEED=489
 
-MIN_DOC_LEN=2
-MIN_DOCS = 2
-DEFAULT_BLOCK_SIZE=512
 
-class NegativeSampler():
-
-    def __init__(self, vocab, word_count, warp=0.75, n_neg_samples=5):
-        '''
-        Store count for the range of indices in the dictionary
-        '''
-        self.n_neg_samples = n_neg_samples
-        index2word = {i:w for w,i in vocab.items()}	
-        # set_trace()
-        max_index = max(index2word.keys())
-        counts = []
-        for n in range(max_index):
-            if n in index2word:
-                counts.append(word_count[index2word[n]]**warp)
-            else:    
-                counts.append(0)
-        counts = np.array(counts)
-        norm_counts = counts/sum(counts)
-        scaling = int(np.ceil(1./min(norm_counts[norm_counts>0])))
-        scaled_counts = (norm_counts*scaling).astype(int)
-        self.cumsum = scaled_counts.cumsum()   
-
-    def sample(self, size):        
-        total_size = np.prod(size)
-        random_ints = np.random.randint(self.cumsum[-1], size=total_size)
-        data_y_neg = np.searchsorted(self.cumsum, random_ints).astype('int32')            
-        return data_y_neg.reshape(size) 
-
-    def sample_filtered(self, exclude, size):        
-        total_size = np.prod(size)
-        random_ints = np.random.randint(self.cumsum[-1], size=total_size)
-        data_y_neg = np.searchsorted(self.cumsum, random_ints).astype('int32')
-        #filter out words that should be excluded 
-        filtered = [x for x in data_y_neg.tolist() if x not in exclude][:total_size]
-        data_y_neg = np.array(filtered)         
-        return data_y_neg.reshape(size) 
-
-def get_vocabulary(inpath, min_word_freq=5, max_vocab_size=None):    
-    print(" > extracting vocabulary")
-    word_counter = Counter()
-    n_docs=0	
-    # doc_lens = []
-    with open(inpath) as fid:	
-        for line in fid:			
-            #discard first token (user id)            
-            message = line.split()[1:]            
-            word_counter.update(message)				
-            n_docs+=1
-            # doc_lens+=[len(message)]
-    #keep only words that occur at least min_word_freq times
-    wc = {w:c for w,c in word_counter.items() if c>min_word_freq} 
-    #keep only the max_vocab_size most frequent words
-    tw = sorted(wc.items(), key=lambda x:x[1],reverse=True)
-    vocab = {w[0]:i for i,w in enumerate(tw[:max_vocab_size])}	
-
-    return vocab, word_counter
-
-def extract_word_embeddings(embeddings_path, vocab, encoding="latin-1"):    
-    print(" > loading word embeddings")
-    full_E = embeddings.read_embeddings(embeddings_path, vocab, encoding)
-    ooevs = embeddings.get_OOEVs(full_E, vocab)
-    #keep only words with pre-trained embeddings    
-    for w in ooevs:
-        del vocab[w]	
-    vocab_redux = {w:i for i,w in enumerate(vocab.keys())}	    
-    #generate the embedding matrix
-    emb_size = full_E.shape[0]
-    E = np.zeros((int(emb_size), len(vocab_redux)))   
-    for wrd,idx in vocab_redux.items(): 
-        E[:, idx] = full_E[:,vocab[wrd]]	       
-    
-    return E, vocab_redux
-
-def build_data(inpath, outpath, embeddings_path, emb_encoding="latin-1", 
-                min_word_freq=5, max_vocab_size=None, random_seed=123, n_neg_samples=10, 
+def build_data(inpath, outpath, encoder_type, embeddings_path=None, emb_encoding="latin-1", 
+                min_word_freq=5, max_vocab_size=None, random_seed=SHUFFLE_SEED, 
                 min_docs_user=2, reset=False):
+    
     pkl_path=outpath+"pkl/"
-    users_path=pkl_path+"users/"  
-    # raise NotImplementedError
+    users_path=pkl_path+"users/"          
     if reset:
         shutil.rmtree(pkl_path, ignore_errors=True)
         shutil.rmtree(users_path, ignore_errors=True)
 
     if not os.path.exists(os.path.dirname(users_path)):
         os.makedirs(os.path.dirname(users_path))   
-
-    vocab = None
-    word_counts = None
-    try:
-        with open(pkl_path+"vocab.pkl", "rb") as fi:        
-            vocab, word_counts = pickle.load(fi)        
-            print("[found cached vocabulary]")
-    except FileNotFoundError:
-        pass
-
-    if not vocab:
-        #compute vocabulary
-        vocab, word_counts = get_vocabulary(inpath, min_word_freq=min_word_freq,max_vocab_size=max_vocab_size)        
-        vocab_len = len(vocab)
-        #extract word embeddings
-        E, vocab_redux = extract_word_embeddings(embeddings_path, vocab, encoding=emb_encoding)
-        #vocab_redux has only words for which an embedding was found
-        print("[vocab size: {} > {}]".format(vocab_len,len(vocab_redux)))
-        vocab = vocab_redux
-        with open(pkl_path+"word_emb.npy", "wb") as f:
-            np.save(f, E)    
-        with open(pkl_path+"vocab.pkl", "wb") as f:
-            pickle.dump([vocab_redux, word_counts], f, pickle.HIGHEST_PROTOCOL)
     
-    rng = np.random.RandomState(random_seed)    
-    with open(inpath) as fi:
-        #peek at the first line to get the first user
-        curr_user, doc = fi.readline().replace("\"", "").replace("'","").split("\t")
-        #read file from the start
-        fi.seek(0,0)
-        user_docs = []
-        doc_lens = []
-        users = []
-        for line in fi:                        
-            user, doc = line.replace("\"", "").replace("'","").split("\t")            
-            #if we reach a new user, save the current one
-            if user!= curr_user:
-                if len(user_docs) >= min_docs_user:
-                    # max_doc_len = max(doc_lens)
-                    save_user(curr_user, user_docs, doc_lens, rng, users_path)
-                    users.append(curr_user)
-                else:
-                    print("> IGNORED user: {}  ({})".format(user,len(user_docs)))
-                #reset current user
-                curr_user = user
-                user_docs = []  
-                doc_lens = []
-            doc = doc.split(" ")            
-            doc_idx = [vocab[w] for w in doc if w in vocab]		
-            doc_len = len(doc_idx)	    
-            if doc_len < MIN_DOC_LEN: continue
-            #accumulate all texts
-            user_docs.append(np.array(doc_idx, dtype=np.int32).reshape(1,-1))        
-            doc_lens.append(doc_len)
-        #save last user
-        if len(user_docs) >= min_docs_user:
-            # max_doc_len = max(doc_lens)
-            save_user(curr_user, user_docs, doc_lens,  rng, users_path)
-            users.append(curr_user)
-        else:
-            print("> IGNORED user: {}  ({})".format(user,len(user_docs)))    
-    print()
-    with open(pkl_path+"users.txt","w") as fo:
-        fo.write("\n".join(users))
+    if encoder_type == "w2v":
+        lib_static.build_data(inpath, outpath, embeddings_path, emb_encoding, 
+                min_word_freq, max_vocab_size, random_seed, min_docs_user)
+    elif encoder_type == "bert":
+        lib_context.build_data(inpath, outpath, random_seed, min_docs_user)
     
-    build_negative_samples(pkl_path, n_neg_samples)
-    
-    
-
 def save_user(user_id, docs, doc_lens, rng, outpath, split=0.8):        
     sys.stdout.write("\r> saving user: {}  ({})".format(user_id,len(docs)))
     sys.stdout.flush()
@@ -186,94 +52,66 @@ def save_user(user_id, docs, doc_lens, rng, outpath, split=0.8):
     docs_train = docs_shuf[:split_idx]
     docs_val = docs_shuf[split_idx:]
     
-    with open(outpath+"temp_"+user_id, "wb") as fo:        
+    with open(outpath+"idx_"+user_id, "wb") as fo:        
         pickle.dump([user_id, doc_lens, docs_train, docs_val], fo)
 
-def build_negative_samples(inpath, n_samples):
-    print("\n> building negative samples")
-    with open(inpath+"vocab.pkl", "rb") as fi:        
-            vocab, word_counts = pickle.load(fi)        
-    sampler = NegativeSampler(vocab, word_counts, warp=0.75)
-    for tmp_user_path in glob.glob(inpath+"/users/temp_*"):
-        with open(tmp_user_path, "rb") as fi:
-            user_id, doc_lens, docs_train, docs_val = pickle.load(fi)
-        pos_samples = []
-        neg_samples = []                
-        for x in docs_train:                    
-            #calculate negative samples 
-            neg_sample = sampler.sample((n_samples, x.shape[1]))    
-            neg_samples += np.split(neg_sample, n_samples) 
-            #replicate each sample to match the number of negative samples            
-            for i in range(n_samples): pos_samples.append(x)
+def remix_samples(inpath, users):
+    print("\n> remix negative samples")
+    rng = RandomState(SHUFFLE_SEED)   
+    fname_pos = inpath+"{}_pos.npy"
+    fname_neg = inpath+"{}_neg.npy"
+    for user in users:
+        curr_user = np.load(fname_pos.format(user))
+        other_users = users.copy()
+        other_users.remove(user)
+        #for each block 
+        blocks = []
+        for x in curr_user.files:
+            done=False
+            curr_block_size = curr_user[x].shape[0]
+            while not done:
+                #sample a random user
+                rand = rng.randint(len(other_users))
+                rand_user = other_users[rand]
+                rand_block = sample_user_block(fname_pos.format(rand_user), rng)
+                if rand_block.shape[0] < curr_block_size:
+                    # print("skip")
+                    continue                
+                elif rand_block.shape[0] > curr_block_size:
+                    # print("trim")
+                    rand_block = rand_block[:curr_block_size,:]                
+                blocks.append(rand_block)
+                done=True
+        # print(len(curr_user.files))
         # from ipdb import set_trace; set_trace()
-        sys.stdout.write("\r> negative samples | user: {}".format(user_id))
-        sys.stdout.flush()
-        
-        with open(inpath+"users/idx_"+user_id, "wb") as fo:        
-            pickle.dump([user_id, doc_lens, pos_samples, docs_val, neg_samples], fo)
-        os.remove(tmp_user_path)
+        with open(fname_neg.format(user), "wb") as fi:
+            np.savez(fi, *blocks)        
+    
     print()
 
-def build_features(inpath, feature_type="w2v", block_size=DEFAULT_BLOCK_SIZE):
-    """
-        save features in blocks of block_size 
-    """
-    inpath=inpath+"pkl/"
-    print("\n> building features")
-    with open(inpath+"vocab.pkl", "rb") as fi:        
-        vocab, word_counts = pickle.load(fi)        
-    with open(inpath+"word_emb.npy", "rb") as f:
-        E = np.load(f)    
-    outpath= f"{inpath}/users/{feature_type}/"
+def sample_user_block(path, rng):
+    x = np.load(path)
+    blocks = x.files
+    rng.shuffle(blocks)
+    rand_block = blocks[0]
+    # print(rand_block)
+    return x[rand_block]
 
+def encode_users(inpath, encoder_type, block_size=DEFAULT_BLOCK_SIZE):
+
+    outpath= f"{inpath}/pkl/users/{encoder_type}/"
     if not os.path.exists(os.path.dirname(outpath)):
-        os.makedirs(os.path.dirname(outpath))   
-    
-    for user_path in glob.glob(inpath+"/users/idx_*"):
-        with open(user_path, "rb") as fi:
-            user_id, doc_lens, positive, validation, negative = pickle.load(fi) 
-        #concatenate all documents into a  single vector
-        positive = np.concatenate(positive, axis=None)
-        negative = np.concatenate(negative, axis=None)
-        validation = np.concatenate(validation, axis=None)
-        #validation data goes into a single block
-        X_validation = E[:, validation].T 
-        with open(outpath+f"/{user_id}_val.npy", "wb") as fi:
-            np.save(fi, X_validation)
-        n_blocks = math.ceil(len(positive)/block_size)        
-        for label, data in zip(["pos","neg"],[positive, negative]):
-            blocks = []
-            for i in range(n_blocks):
-                block = data[i*block_size:(i+1)*block_size]                
-                E_block = E[:, block].T
-                blocks.append(E_block)
-            # from ipdb import set_trace; set_trace()
-            with open(outpath+f"/{user_id}_{label}.npy", "wb") as fi:
-                np.savez(fi, *blocks)
-        
-        
-        # X_positive = E[:, positive].T
-        # X_negative = E[:, negative].T
-        # with open(outpath+f"/{user_id}_pos.npy", "wb") as fi:
-        #     np.save(fi, X_positive)
-        # with open(outpath+f"/{user_id}_neg.npy", "wb") as fi:
-        #     np.save(fi, X_negative)
-        # with open(outpath+f"/{user_id}_neg#{i}.npy", "wb") as fi:
-        #     np.save(fi, X_negative)
-        
-        # for i in range(n_blocks):
-        #     positive_block = positive[i*block_size:(i+1)*block_size]
-        #     negative_block = negative[i*block_size:(i+1)*block_size]
-        #     X_positive = E[:, positive_block].T
-        #     X_negative = E[:, negative_block].T
-        #     # from ipdb import set_trace; set_trace()
-        #     with open(outpath+f"/{user_id}_pos#{i}.npy", "wb") as fi:
-        #         np.save(fi, X_positive)
-        #     with open(outpath+f"/{user_id}_neg#{i}.npy", "wb") as fi:
-        #         np.save(fi, X_negative)
+        os.makedirs(os.path.dirname(outpath)) 
 
-        sys.stdout.write("\r> features | user: {}".format(user_id))
-        sys.stdout.flush()
+    if encoder_type == "w2v":
+        users = lib_static.word2vec_features(inpath, outpath, block_size=block_size)
+    elif encoder_type == "bert":
+        users = lib_context.BERT_features(inpath, outpath, block_size=block_size)
+    else:
+        raise NotImplementedError
+    remix_samples(outpath, users)
+
+
 
 def stich_embeddings(inpath, outpath, emb_dim):
     print("[writing embeddings to {}]".format(outpath))
@@ -285,8 +123,9 @@ def stich_embeddings(inpath, outpath, emb_dim):
                 l = fi.readlines()[1]
             fo.write(l)
 
-def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, reset=False, device=None):
+def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, reset=False, device=None):  
     print("\ntraining...")
+    st = time.time()
     txt_path = f"{path}/txt/{encoder}/"
     if reset:
         shutil.rmtree(txt_path, ignore_errors=True)    
@@ -311,155 +150,16 @@ def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, rese
         f_val = open(user_fname.format(path, encoder, user, "val"), "rb")
         val_samples = np.load(f_val, allow_pickle=True)        
         emb_dim = val_samples.shape[1]        
-        f = model.User2Vec(user, emb_dim, txt_path, margin=margin, initial_lr=initial_lr, epochs=epochs, device=device, batch_size=100)   
+        f = User2Vec(user, emb_dim, txt_path, margin=margin, initial_lr=initial_lr, epochs=epochs, device=device, batch_size=100)   
         f.fit(pos_samples, neg_samples, val_samples)
         # break
         f_pos.close()
         f_neg.close()
         f_val.close()
+    ft = time.time()
+    et = ft - st
+    print(f"total time: {round(et,3)}")
     if emb_dim:
         stich_embeddings(txt_path, path+"{}_U.txt".format(encoder), emb_dim)
 
-        # print(batches)        
-        # print(pos_samples[batches[0]])
-        
-        
-            # pos_samples = torch.from_numpy(pos_samples.astype(np.float32))     
-        #     neg_samples = torch.from_numpy(neg_samples.astype(np.float32))     
-        #     val_samples = torch.from_numpy(val_samples.astype(np.float32))     
-
-
-
-# def train_model(path, encoder="w2v", epochs=20, initial_lr=0.001, margin=1, reset=False, device=None):
-#     print("\ntraining...")
-#     txt_path = path+"/txt/"    
-#     if reset:
-#         shutil.rmtree(txt_path, ignore_errors=True)    
-#     if not os.path.exists(os.path.dirname(txt_path)):
-#         os.makedirs(os.path.dirname(txt_path))       
-#     with open(path+"/pkl/users.txt") as fi:
-#         users = [u.replace("\n","") for u in fi.readlines()]
     
-#     random.shuffle(users)
-#     cache = set([os.path.basename(f).replace(".txt","") for f in Path(txt_path).iterdir()])
-#     emb_dim = None
-#     for user in users:    
-#         if user in cache:
-#             print("cached embedding: {}".format(user))
-#             continue
-#         user_fname = "{}/pkl/users/{}_{}_{}.npy" 
-#         with open(user_fname.format(path, encoder, user, "pos"), "rb") as fi:
-#             pos_samples = np.load(fi)
-#             pos_samples = torch.from_numpy(pos_samples.astype(np.float32))     
-#         with open(user_fname.format(path, encoder, user, "neg"), "rb") as fi:
-#             neg_samples = np.load(fi)
-#             neg_samples = torch.from_numpy(neg_samples.astype(np.float32))     
-#         with open(user_fname.format(path, encoder, user, "val"), "rb") as fi:
-#             val_samples = np.load(fi)
-#             val_samples = torch.from_numpy(val_samples.astype(np.float32))     
-        
-#         print("{} | tr: {} | ts: {}".format(user, pos_samples.shape[0], val_samples.shape[0]))
-#         emb_dim = pos_samples.shape[-1]
-#         f = model.User2Vec(user, emb_dim, txt_path, margin=1, initial_lr=10, epochs=20, device=device, batch_size=100)   
-#         f.fit(pos_samples, neg_samples, val_samples)
-#         # break
-#     if emb_dim:
-#         stich_embeddings(txt_path, path+"{}_U.txt".format(encoder), emb_dim)
-
-# def train_model(path,  epochs=20, initial_lr=0.001, margin=1, reset=False, device=None):
-#     txt_path = path+"/txt/"    
-#     if reset:
-#         shutil.rmtree(txt_path, ignore_errors=True)
-    
-#     if not os.path.exists(os.path.dirname(txt_path)):
-#         os.makedirs(os.path.dirname(txt_path))   
-    
-#     E = np.load(path+"/pkl/word_emb.npy")    
-#     E = torch.from_numpy(E.astype(np.float32))     
-#     user_data = list(Path(path+"/pkl/users/").iterdir())
-#     random.shuffle(user_data)
-#     cache = set([os.path.basename(f).replace(".txt","") for f in Path(txt_path).iterdir()])
-    
-#     for j, user_fname in enumerate(user_data):
-#         user = os.path.basename(user_fname) 
-#         if user in cache:
-#             print("cached embedding: {}".format(user))
-#             continue        
-#         with open(user_fname, "rb") as fi:
-#             user_id, pos_samples, neg_samples, val_samples = pickle.load(fi)
-        
-#         print("{} | tr: {} | ts: {}".format(user_id,len(pos_samples), len(val_samples)))
-#         f = model.User2Vec(user_id, E.T, txt_path, margin=margin, initial_lr=initial_lr, 
-#                         epochs=epochs, device=device)    
-#         f.fit(pos_samples, neg_samples, val_samples)
-#     stich_embeddings(txt_path, path, E.shape[0])
-
-
-
-
-# def build_data(inpath, outpath, embeddings_path, emb_encoding="latin-1", 
-#                 min_word_freq=5, max_vocab_size=None, random_seed=123, n_neg_samples=10, 
-#                 min_docs_user=2, reset=False):
-#     pkl_path=outpath+"pkl/"
-#     users_path=pkl_path+"users/"  
-
-#     if reset:
-#         shutil.rmtree(pkl_path, ignore_errors=True)
-#         shutil.rmtree(users_path, ignore_errors=True)
-
-#     if not os.path.exists(os.path.dirname(users_path)):
-#         os.makedirs(os.path.dirname(users_path))   
-
-#     vocab = None
-#     word_counts = None
-#     try:
-#         with open(pkl_path+"vocab.pkl", "rb") as fi:        
-#             vocab, word_counts = pickle.load(fi)        
-#             print("[found cached vocabulary]")
-#     except FileNotFoundError:
-#         pass
-
-#     if not vocab:
-#         #compute vocabulary
-#         vocab, word_counts = get_vocabulary(inpath, min_word_freq=min_word_freq,max_vocab_size=max_vocab_size)        
-#         vocab_len = len(vocab)
-#         #extract word embeddings
-#         E, vocab_redux = extract_word_embeddings(embeddings_path, vocab, encoding=emb_encoding)
-#         #vocab_redux has only words for which an embedding was found
-#         print("[vocab size: {} > {}]".format(vocab_len,len(vocab_redux)))
-#         vocab = vocab_redux
-#         with open(pkl_path+"word_emb.npy", "wb") as f:
-#             np.save(f, E)    
-#         with open(pkl_path+"vocab.pkl", "wb") as f:
-#             pickle.dump([vocab_redux, word_counts], f, pickle.HIGHEST_PROTOCOL)
-        
-#     #negative sampler    
-#     sampler = NegativeSampler(vocab, word_counts, warp=0.75)
-#     rng = np.random.RandomState(random_seed)    
-#     with open(inpath) as fi:
-#         #peek at the first line to get the first user
-#         curr_user, doc = fi.readline().replace("\"", "").replace("'","").split("\t")
-#         #read file from the start
-#         fi.seek(0,0)
-#         user_docs = []
-#         for line in fi:                        
-#             user, doc = line.replace("\"", "").replace("'","").split("\t")            
-#             #if we reach a new user, save the current one
-#             if user!= curr_user:
-#                 if len(user_docs) >= min_docs_user:
-#                     save_user(curr_user, user_docs, sampler, rng, users_path, n_neg_samples)
-#                 else:
-#                     print("> IGNORED user: {}  ({})".format(user,len(user_docs)))
-#                 #reset current user
-#                 curr_user = user
-#                 user_docs = []  
-#             doc = doc.split(" ")            
-#             doc_idx = [vocab[w] for w in doc if w in vocab]			    
-#             if len(doc_idx) < MIN_DOC_LEN: continue
-#             #accumulate all texts
-#             user_docs.append(np.array(doc_idx, dtype=np.int32).reshape(1,-1))        
-#         #save last user
-#         if len(user_docs) >= min_docs_user:
-#             save_user(curr_user, user_docs, sampler, rng, users_path, n_neg_samples)
-#         else:
-#             print("> IGNORED user: {}  ({})".format(user,len(user_docs)))
