@@ -1,7 +1,7 @@
 import argparse
 import os
-from lib import build_data, train_model, encode_users
-from encoders import BERTEncoder, W2VEncoder, ELMoEncoder, FastTextEncoder
+from u2v.lib import build_data, train_model, encode_users
+from u2v.encoders import BERTEncoder, W2VEncoder, ELMoEncoder, FastTextEncoder
 import torch 
 
 def cmdline_args():
@@ -19,12 +19,12 @@ def cmdline_args():
                         help='ignore users with less min_docs_user documents')
     parser.add_argument('-seed', type=int, default=1234, 
                         help='random number generator seed')    
-    parser.add_argument('-neg_samples', type=int, help='number of negative samples',
-                         default=10)
+    # parser.add_argument('-neg_samples', type=int, help='number of negative samples',
+    #                      default=10)
     parser.add_argument('-epochs', type=int, default=20, help='number of training epochs')    
     parser.add_argument('-val_split', type=float, default=0.2, help='percentage of data reserved for validation')    
     parser.add_argument('-lr', type=float, default=0.01, help='learning rate')    
-    parser.add_argument('-margin', type=float, default=1, help='hinge loss margin')    
+    parser.add_argument('-margin', type=int, default=1, help='hinge loss margin')    
     parser.add_argument('-reset', action="store_true", 
                         help='reset embeddings that were already computed')
     parser.add_argument('-train', action="store_true", 
@@ -38,24 +38,22 @@ def cmdline_args():
     parser.add_argument('-encoder_type', choices=["w2v","bert","elmo","fasttext"], default="w2v", 
                         help="encoder type")
     parser.add_argument('-device', type=str, default="auto", help='device')
+    parser.add_argument('-run_id', type=str, default="", help='run id')
     parser.add_argument('-pretrained_model', type=str, default="bert-base-uncased", 
                         help='name of pretrained transformer weights')
     parser.add_argument('-encoder_batchsize', type=int, default=80, 
                         help='encoder batch size')
+    parser.add_argument('-batch_size', type=int, default=128, 
+                        help='batch size')
     parser.add_argument('-window_size', type=int, default=128, help='window size')
     return parser.parse_args()	
 
 
 if __name__ == "__main__" :    
     args = cmdline_args()
-    info = "[encoder: {} | input: {} | output: {} | embedding: {} | epochs: {} | lr: {} | margin: {} | neg samples: {} | reset: {} | device: {}]"
+    info = "[encoder: {} | input: {} | output: {} | reset: {} | device: {}]"
     print(info.format(args.encoder_type, os.path.basename(args.input), 
-                        args.output,
-                        os.path.basename(args.emb),
-                        args.epochs,
-                        args.lr,
-                        args.margin,
-                        args.neg_samples,
+                        args.output,                        
                         args.reset,
                         args.device))   
     output_path=f"{args.output}/{args.encoder_type}/"
@@ -95,10 +93,13 @@ if __name__ == "__main__" :
             device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         else:
             device = torch.device(args.device)
+        if args.run_id == "auto":            
+            run_id = f"{args.epochs}_{args.margin}_{args.lr}"
+            # from ipdb import set_trace; set_trace()
+        else:
+            run_id = args.run_id
         print("> train")
-        train_model(output_path, encoder_type=args.encoder_type, 
-                    epochs=args.epochs, initial_lr=args.lr, 
-                    margin=args.margin,
-                    validation_split = args.val_split,
-                    reset=args.reset_cache,
+        train_model(output_path, run_id=run_id, batch_size=args.batch_size,
+                    epochs=args.epochs, initial_lr=args.lr, margin=args.margin,
+                    validation_split = args.val_split, reset=args.reset_cache,
                     device=device)

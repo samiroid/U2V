@@ -4,7 +4,7 @@
 
 # import argparse
 # # from ipdb import set_trace
-# import glob
+import glob
 import os
 import pickle
 import random
@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from numpy.random import RandomState
 import time
-from model import User2Vec
+from u2v.model import User2Vec
 
 DEFAULT_WINDOW_SIZE=64
 SHUFFLE_SEED=489
@@ -49,16 +49,16 @@ def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED,
     
     # outpath = f"{outpath}/{encoder_type}/"
     pkl_path=outpath+"pkl/"
-    users_path=pkl_path+"users/"          
+    # users_path=pkl_path+"users/"          
     if reset:
         shutil.rmtree(pkl_path, ignore_errors=True)
-        shutil.rmtree(users_path, ignore_errors=True)
+        # shutil.rmtree(users_path, ignore_errors=True)
 
-    if not os.path.exists(os.path.dirname(users_path)):
-        os.makedirs(os.path.dirname(users_path))   
+    if not os.path.exists(os.path.dirname(pkl_path)):
+        os.makedirs(os.path.dirname(pkl_path))   
     
-    pkl_path=outpath+"pkl/"
-    users_path=pkl_path+"users/"    
+    # pkl_path=outpath+"pkl/"
+    # users_path=pkl_path+"users/"    
         
     rng = np.random.RandomState(random_seed)    
 
@@ -76,7 +76,7 @@ def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED,
             if user!= curr_user:
                 if len(user_docs) >= min_docs_user:
                     # max_doc_len = max(doc_lens)
-                    save_user(curr_user, user_docs, doc_lens, rng, users_path)
+                    save_user(curr_user, user_docs, doc_lens, rng, pkl_path)
                     users.append(curr_user)
                 else:
                     print("> IGNORED user: {}  ({})".format(user,len(user_docs)))
@@ -95,7 +95,7 @@ def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED,
         if len(user_docs) >= min_docs_user:
             # max_doc_len = max(doc_lens)
             
-            save_user(curr_user, user_docs, doc_lens,  rng, users_path)
+            save_user(curr_user, user_docs, doc_lens,  rng, pkl_path)
             users.append(curr_user)
         else:
             print("> IGNORED user: {}  ({})".format(user,len(user_docs)))    
@@ -147,7 +147,32 @@ def remix_samples(path, users):
         with open(fname_neg.format(user), "wb") as fi:
             np.savez(fi, *windows)        
     
-    print()
+def mean_word_embeddings(path, outpath, users):
+    print("\n> mean word embeddings")
+    rng = RandomState(SHUFFLE_SEED)   
+    fname_pos = path+"{}_pos.npy"
+    fname_mean = path+"mean-{}.txt"
+    for user in users:
+        curr_user = np.load(fname_pos.format(user))                
+        #sum of all embeddings
+        emb_dim = curr_user[curr_user.files[0]].shape[1]
+        sum_emb = np.zeros(emb_dim)
+        total_size = 0
+        for x in curr_user.files:            
+            window_size = curr_user[x].shape[0]
+            total_size+=window_size
+            window = curr_user[x]
+            sum_emb+=np.sum(window, axis=0)
+                
+        mean_emb = sum_emb/total_size            
+            
+        with open(fname_mean.format(user),"w") as fo:              
+            fo.write('%d %d\n' % (1, emb_dim))            
+            e = ' '.join(map(lambda x: str(x), mean_emb))
+            fo.write('%s %s\n' % (user, e))
+        
+    stich_embeddings(path, outpath, emb_dim, "mean")
+
 
 def sample_user_window(path, rng):
     x = np.load(path)
@@ -159,47 +184,34 @@ def sample_user_window(path, rng):
 
 def encode_users(path, encoder, window_size=DEFAULT_WINDOW_SIZE):
     # path = f"{path}/{encoder_type}/"
-    outpath= f"{path}/pkl/users/"
-    if not os.path.exists(os.path.dirname(outpath)):
-        os.makedirs(os.path.dirname(outpath)) 
-    users = encoder.encode(path, outpath, window_size)    
-    remix_samples(outpath, users)
+    pkl_path= f"{path}/pkl/"
+    txt_path= f"{path}/txt/"
+    if not os.path.exists(os.path.dirname(pkl_path)):
+        os.makedirs(os.path.dirname(pkl_path)) 
+    if not os.path.exists(os.path.dirname(txt_path)):
+        os.makedirs(os.path.dirname(txt_path)) 
+    users = encoder.encode(path, pkl_path, window_size)    
+    remix_samples(pkl_path, users)
+    mean_word_embeddings(pkl_path, path, users)
+    
 
+def stich_embeddings(inpath, outpath, emb_dim, run_id=""):
+    if run_id:
+        user_embeddings = list(glob.glob(f"{inpath}/{run_id}-*"))
+        outpath = f"{outpath}U_{run_id}.txt"        
+    else:        
+        user_embeddings = list(glob.glob(f"{inpath}/*"))
+        outpath = f"{outpath}U.txt"
 
-# def encode_users(path, encoder_type, window_size=DEFAULT_WINDOW_SIZE, 
-#                 pretrained_model=None, encoder_batchsize=DEFAULT_BATCH_SIZE, device="cpu"):
-
-#     path = f"{path}/{encoder_type}/"
-#     outpath= f"{path}/pkl/users/"
-#     if not os.path.exists(os.path.dirname(outpath)):
-#         os.makedirs(os.path.dirname(outpath)) 
-
-#     if encoder_type == "w2v":
-#         users = lib_static.word2vec_features(path, outpath, window_size=window_size)
-#     elif encoder_type == "bert":
-#         users = lib_context.BERT_features(path, outpath, window_size=window_size,
-#                                         pretrained_model=pretrained_model,
-#                                         encoder_batchsize=encoder_batchsize, 
-#                                         device=device)
-
-         
-#     else:
-#         raise NotImplementedError
-#     remix_samples(outpath, users)
-
-
-
-def stich_embeddings(inpath, outpath, emb_dim):
     print("[writing embeddings to {}]".format(outpath))
-    with open(outpath,"w") as fo:    
-        user_embeddings = list(Path(inpath).iterdir())
+    with open(outpath,"w") as fo:            
         fo.write("{}\t{}\n".format(len(user_embeddings), emb_dim))
         for u in user_embeddings:
             with open(u, "r") as fi:
                 l = fi.readlines()[1]
             fo.write(l)
 
-def train_model(path, encoder_type="w2v", epochs=20, initial_lr=0.001, margin=1, validation_split=0.8, reset=False, device=None):  
+def train_model(path, run_id=None, batch_size=100, epochs=20, initial_lr=0.001, margin=1, validation_split=0.8, reset=False, device=None):  
     print("\ntraining...")
     st = time.time()
     # path = f"{path}/{encoder_type}/"
@@ -213,14 +225,13 @@ def train_model(path, encoder_type="w2v", epochs=20, initial_lr=0.001, margin=1,
     
     random.shuffle(users)
     cache = set([os.path.basename(f).replace(".txt","") for f in Path(txt_path).iterdir()])
-    emb_dim = None
-    n_users = 0
+    emb_dim = None    
     val_perfs = []
     for user in users:    
         if user in cache:
             print("cached embedding: {}".format(user))
             continue
-        user_fname = "{}/pkl/users/{}_{}.npy" 
+        user_fname = "{}/pkl/{}_{}.npy" 
 
         f_pos = open(user_fname.format(path, user, "pos"), "rb")
         pos_samples = np.load(f_pos, allow_pickle=True)            
@@ -228,7 +239,8 @@ def train_model(path, encoder_type="w2v", epochs=20, initial_lr=0.001, margin=1,
         neg_samples = np.load(f_neg, allow_pickle=True)
         
         emb_dim = pos_samples[pos_samples.files[0]].shape[1] 
-        f = User2Vec(user, emb_dim, txt_path, margin=margin, initial_lr=initial_lr, epochs=epochs, device=device, batch_size=100, validation_split=validation_split)   
+        f = User2Vec(user, emb_dim, txt_path, margin=margin, initial_lr=initial_lr, 
+                    epochs=epochs, device=device, batch_size=batch_size, validation_split=validation_split, run_id=run_id)   
         val_perf = f.fit(pos_samples, neg_samples)
         val_perfs.append(val_perf)        
         f_pos.close()
@@ -240,8 +252,9 @@ def train_model(path, encoder_type="w2v", epochs=20, initial_lr=0.001, margin=1,
     max_val = round(max(val_perfs),3)
     min_val = round(min(val_perfs),3)
     mean_val = round(np.mean(val_perfs),3)
-    print(f"avg val: {mean_val} ({max_val}-{min_val})")
-    if emb_dim:
-        stich_embeddings(txt_path, path+"{}_U.txt".format(encoder_type), emb_dim)
+    std_val = round(np.std(val_perfs),3)
+    print(f"avg val: {mean_val} ({std_val}) [{max_val};{min_val}]")
+    if emb_dim:        
+        stich_embeddings(txt_path, path, emb_dim, run_id)
 
     

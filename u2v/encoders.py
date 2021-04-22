@@ -56,7 +56,7 @@ class BERTEncoder(Encoder):
         print("\n> BERT features ({})".format(self.pretrained_model))        
         
         users = []
-        for user_path in glob.glob(inpath+"/users/idx_*"):
+        for user_path in glob.glob(inpath+"/idx_*"):
             with open(user_path, "rb") as fi:
                 user_id, doc_lens, docs = pickle.load(fi) 
             users.append(user_id)        
@@ -118,7 +118,7 @@ class ELMoEncoder(Encoder):
         print("\n> ELMo features")        
         
         users = []
-        for user_path in glob.glob(inpath+"/users/idx_*"):
+        for user_path in glob.glob(inpath+"/idx_*"):
             with open(user_path, "rb") as fi:
                 user_id, doc_lens, docs = pickle.load(fi) 
             users.append(user_id)        
@@ -171,7 +171,7 @@ class FastTextEncoder(Encoder):
         print("\n> FastText features")        
         
         users = []
-        for user_path in glob.glob(inpath+"/users/idx_*"):
+        for user_path in glob.glob(inpath+"/idx_*"):
             with open(user_path, "rb") as fi:
                 user_id, doc_lens, docs = pickle.load(fi) 
             users.append(user_id)        
@@ -227,7 +227,7 @@ class W2VEncoder(Encoder):
         with open(inpath+"word_emb.npy", "rb") as f:
             E = np.load(f)        
         users = []
-        for user_path in glob.glob(inpath+"/users/idx_*"):
+        for user_path in glob.glob(inpath+"/idx_*"):
             with open(user_path, "rb") as fi:
                 user_id, doc_lens, docs_idx = pickle.load(fi) 
             
