@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from allennlp.modules.elmo import Elmo, batch_to_ids
 import numpy as np
 import torch
+from torch._C import set_num_threads
 from transformers import AutoTokenizer, AutoModel
 import math
 import pickle
@@ -12,7 +13,7 @@ import fasttext
 from tadat.core import embeddings
 import os
 BERT_MAX_INPUT = 512
-
+ELMO_MAX_INPUT = 128
 class Encoder(ABC):
 
     def doc2idx(self, doc):
@@ -31,7 +32,7 @@ class BERTEncoder(Encoder):
         self.encoder_batchsize = encoder_batchsize
         self.device = device
         self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
-        self.encoder = AutoModel.from_pretrained(pretrained_model, output_hidden_states=False).to(self.device)
+        self.encoder = AutoModel.from_pretrained(pretrained_model).to(self.device)
         #set encoder to eval mode
         self.encoder.eval()
 
@@ -66,7 +67,7 @@ class BERTEncoder(Encoder):
                 batch_docs = docs[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
                 batch_lens = doc_lens[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
                 if len(batch_docs) > 0:
-                    sys.stdout.write("\nbatch:{}/{} (size: {})".format(j+1,n_batches, str(len(batch_docs))))
+                    sys.stdout.write("\rbatch:{}/{} (size: {})".format(j+1,n_batches, str(len(batch_docs))))
                     sys.stdout.flush()
                     #encode it
                     docs_tensor = torch.cat([torch.tensor([t]) for t in batch_docs])
@@ -74,7 +75,9 @@ class BERTEncoder(Encoder):
                     docs_tensor = docs_tensor.to(self.device)
                     segments_tensor = segments_tensor.to(self.device)                    
                     with torch.no_grad():              
-                        Z, cls = self.encoder(docs_tensor, token_type_ids=segments_tensor)    
+                        model_out = self.encoder(docs_tensor, token_type_ids=segments_tensor)    
+                        Z, cls = model_out.to_tuple()
+                        # from pdb import set_trace; set_trace()
                         Z = Z.cpu().numpy()
                     #append encoded docs
                     for l, z in zip(batch_lens,Z):
@@ -128,10 +131,12 @@ class ELMoEncoder(Encoder):
                 batch_docs = docs[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
                 batch_lens = doc_lens[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
                 if len(batch_docs) > 0:
-                    sys.stdout.write("\nbatch:{}/{} (size: {})".format(j+1,n_batches, str(len(batch_docs))))
+                    char_idxs = batch_to_ids(batch_docs).to(self.device)         
+                    char_idxs = char_idxs[:,:ELMO_MAX_INPUT,:]
+                    sys.stdout.write("\rbatch:{}/{} (size: {})".format(j+1,n_batches, str(len(batch_docs))))
                     sys.stdout.flush()
-                    #encode it
-                    char_idxs = batch_to_ids(batch_docs).to(self.device)                    
+                    # from pdb import set_trace; set_trace()           
+                    #encode it                    
                     with torch.no_grad():   
                         output = self.encoder(char_idxs)
                     Z = output["elmo_representations"][0]

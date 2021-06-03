@@ -99,6 +99,7 @@ if __name__ == "__main__" :
         else:
             run_id = args.run_id
         print("> train")
+        # from ipdb import set_trace;set_trace()
         train_model(output_path, run_id=run_id, batch_size=args.batch_size,
                     epochs=args.epochs, initial_lr=args.lr, margin=args.margin,
                     validation_split = args.val_split, reset=args.reset_cache,

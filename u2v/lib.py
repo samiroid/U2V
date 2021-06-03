@@ -4,16 +4,17 @@
 
 # import argparse
 # # from ipdb import set_trace
+# # import codecs
+# from collections import Counter
+# import math
+
 import glob
 import os
 import pickle
 import random
 import shutil
 import sys
-# # import codecs
-# from collections import Counter
 from pathlib import Path
-# import math
 import numpy as np
 from numpy.random import RandomState
 import time
@@ -21,7 +22,7 @@ from u2v.model import User2Vec
 
 DEFAULT_WINDOW_SIZE=64
 SHUFFLE_SEED=489
-DEFAULT_BATCH_SIZE = 128
+DEFAULT_BATCH_SIZE=128
 MIN_DOC_LEN=2
 
 # def build_data(inpath, outpath, encoder_type, embeddings_path=None, emb_encoding="latin-1", 
@@ -45,37 +46,38 @@ MIN_DOC_LEN=2
 #         lib_context.build_data(inpath, outpath, random_seed, min_docs_user)
 
 def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED, 
-                min_docs_user=2, reset=False):
+                min_docs_user=1, reset=False):
     
-    # outpath = f"{outpath}/{encoder_type}/"
-    pkl_path=outpath+"pkl/"
-    # users_path=pkl_path+"users/"          
+    
+    pkl_path=outpath+"pkl/"    
     if reset:
-        shutil.rmtree(pkl_path, ignore_errors=True)
-        # shutil.rmtree(users_path, ignore_errors=True)
-
+        shutil.rmtree(pkl_path, ignore_errors=True)    
     if not os.path.exists(os.path.dirname(pkl_path)):
         os.makedirs(os.path.dirname(pkl_path))   
-    
-    # pkl_path=outpath+"pkl/"
-    # users_path=pkl_path+"users/"    
-        
-    rng = np.random.RandomState(random_seed)    
 
+    rng = np.random.RandomState(random_seed)    
     with open(inpath) as fi:
+        #skip header
+        next(fi)
         #peek at the first line to get the first user
         curr_user, doc = fi.readline().replace("\"", "").replace("\n","").replace("'","").split("\t")
-        #read file from the start
+        #read file from the start and skip header
         fi.seek(0,0)
+        next(fi)
         user_docs = []
         doc_lens = []
         users = []
+        #skip header        
+        
         for line in fi:                        
-            user, doc = line.replace("\"", "").replace("\n","").replace("'","").split("\t")            
+            try:
+                user, doc = line.replace("\"", "").replace("\n","").replace("'","").split("\t")            
+            except ValueError:
+                print(f"skipped line {line}")
+                # from ipdb import set_trace; set_trace()
             #if we reach a new user, save the current one
             if user!= curr_user:
-                if len(user_docs) >= min_docs_user:
-                    # max_doc_len = max(doc_lens)
+                if len(user_docs) >= min_docs_user:                    
                     save_user(curr_user, user_docs, doc_lens, rng, pkl_path)
                     users.append(curr_user)
                 else:
@@ -85,16 +87,13 @@ def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED,
                 user_docs = []  
                 doc_lens = []
             
-            if len(doc.split(" ")) < MIN_DOC_LEN: continue
-            
+            if len(doc.split(" ")) < MIN_DOC_LEN: continue            
             doc_len, doc_idx = encoder.doc2idx(doc)            
             #accumulate all texts
             user_docs.append(doc_idx)        
             doc_lens.append(doc_len)
         #save last user
         if len(user_docs) >= min_docs_user:
-            # max_doc_len = max(doc_lens)
-            
             save_user(curr_user, user_docs, doc_lens,  rng, pkl_path)
             users.append(curr_user)
         else:
@@ -147,11 +146,11 @@ def remix_samples(path, users):
         with open(fname_neg.format(user), "wb") as fi:
             np.savez(fi, *windows)        
     
-def mean_word_embeddings(path, outpath, users):
-    print("\n> mean word embeddings")
+def mean_word_embeddings(path, users):
+    print("> mean word embeddings")
     rng = RandomState(SHUFFLE_SEED)   
-    fname_pos = path+"{}_pos.npy"
-    fname_mean = path+"mean-{}.txt"
+    fname_pos = path+"/pkl/{}_pos.npy"
+    fname_mean = path+"/txt/mean-{}.txt"
     for user in users:
         curr_user = np.load(fname_pos.format(user))                
         #sum of all embeddings
@@ -171,7 +170,7 @@ def mean_word_embeddings(path, outpath, users):
             e = ' '.join(map(lambda x: str(x), mean_emb))
             fo.write('%s %s\n' % (user, e))
         
-    stich_embeddings(path, outpath, emb_dim, "mean")
+    stich_embeddings(path+"/txt/", path, emb_dim, "mean")
 
 
 def sample_user_window(path, rng):
@@ -192,7 +191,7 @@ def encode_users(path, encoder, window_size=DEFAULT_WINDOW_SIZE):
         os.makedirs(os.path.dirname(txt_path)) 
     users = encoder.encode(path, pkl_path, window_size)    
     remix_samples(pkl_path, users)
-    mean_word_embeddings(pkl_path, path, users)
+    mean_word_embeddings(path, users)
     
 
 def stich_embeddings(inpath, outpath, emb_dim, run_id=""):
@@ -225,14 +224,16 @@ def train_model(path, run_id=None, batch_size=100, epochs=20, initial_lr=0.001, 
     
     random.shuffle(users)
     cache = set([os.path.basename(f).replace(".txt","") for f in Path(txt_path).iterdir()])
+    # from ipdb import set_trace; set_trace()
     emb_dim = None    
     val_perfs = []
     for user in users:    
-        if user in cache:
+        #account for cases where a run_id is used to prefix the file
+        user_check = run_id+"-"+user if run_id else user
+        if user_check in cache:
             print("cached embedding: {}".format(user))
             continue
         user_fname = "{}/pkl/{}_{}.npy" 
-
         f_pos = open(user_fname.format(path, user, "pos"), "rb")
         pos_samples = np.load(f_pos, allow_pickle=True)            
         f_neg = open(user_fname.format(path, user, "neg"), "rb")
@@ -249,10 +250,15 @@ def train_model(path, run_id=None, batch_size=100, epochs=20, initial_lr=0.001, 
     ft = time.time()
     et = ft - st
     print(f"total time: {round(et,3)}")
-    max_val = round(max(val_perfs),3)
-    min_val = round(min(val_perfs),3)
-    mean_val = round(np.mean(val_perfs),3)
-    std_val = round(np.std(val_perfs),3)
+    max_val = 0
+    min_val = 0
+    mean_val = 0
+    std_val = 0
+    if len(val_perfs) > 0:
+        max_val = round(max(val_perfs),3)
+        min_val = round(min(val_perfs),3)
+        mean_val = round(np.mean(val_perfs),3)
+        std_val = round(np.std(val_perfs),3)
     print(f"avg val: {mean_val} ({std_val}) [{max_val};{min_val}]")
     if emb_dim:        
         stich_embeddings(txt_path, path, emb_dim, run_id)

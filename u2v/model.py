@@ -15,7 +15,8 @@ class User2Vec(nn.Module):
 
     def __init__(self, user_id, emb_dimension, outpath, margin=1, initial_lr=0.1, 
                   validation_split=0.8, epochs=10, batch_size=None, run_id="", device=None):
-        super(User2Vec, self).__init__()     
+        
+        super(User2Vec, self).__init__()             
         if not device:
             device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         assert validation_split >= 0 and validation_split <=1
@@ -85,8 +86,13 @@ class User2Vec(nn.Module):
             n_val = X_val.shape[0]
             validation = X_val.to(self.device)    
         n_windows = len(train_windows)
-        N  = X_positive[train_windows[0]].shape[0] * n_windows
-        
+        try:
+            N  = X_positive[train_windows[0]].shape[0] * n_windows
+        except IndexError:
+            print("ignored user")
+            return 0
+
+
         print("{} | tr: {} ({}) | val: {}".format(self.user_id, N, n_windows, n_val))        
         optimizer = optim.Adam(self.parameters(), lr=self.initial_lr)       
         rng = RandomState(SHUFFLE_SEED)       
