@@ -13,10 +13,13 @@ SHUFFLE_SEED=10
 
 class User2Vec(nn.Module):
 
-    def __init__(self, user_id, emb_dimension, outpath, margin=1, initial_lr=0.1, 
-                  validation_split=0.8, epochs=10, batch_size=None, run_id="", device=None):
+    def __init__(self, user_id, emb_dimension, outpath, encoder_id, 
+                margin=1, initial_lr=0.1, validation_split=0.8, epochs=10, 
+                batch_size=None, run_id="", device=None):
         
         super(User2Vec, self).__init__()             
+        self.encoder_id = encoder_id
+
         if not device:
             device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         assert validation_split >= 0 and validation_split <=1
@@ -31,6 +34,7 @@ class User2Vec(nn.Module):
         self.initial_lr = initial_lr
         self.training_split = 1-validation_split
         self.epochs = epochs
+        
                 
         self.emb_dimension = emb_dimension
         #user embedding matrix

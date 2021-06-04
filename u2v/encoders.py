@@ -25,16 +25,24 @@ class Encoder(ABC):
     def encode(self, inpath, outpath, window_size):
         pass
 
-class BERTEncoder(Encoder):
-    def __init__(self, pretrained_model, encoder_batchsize, device) -> None:
+    
+
+class BERTEncoder(Encoder):    
+
+    def __init__(self, pretrained_weights, encoder_batchsize, device) -> None:
         super().__init__()
-        self.pretrained_model = pretrained_model
+        weights = {
+        "clinicalbert": "emilyalsentzer/Bio_ClinicalBERT",
+        "base": "bert-base-uncased"
+        }
+        self.pretrained_weights = weights.get(pretrained_weights, pretrained_weights)
         self.encoder_batchsize = encoder_batchsize
-        self.device = device
-        self.tokenizer = AutoTokenizer.from_pretrained(pretrained_model)
-        self.encoder = AutoModel.from_pretrained(pretrained_model).to(self.device)
+        self.device = device        
+        self.tokenizer = AutoTokenizer.from_pretrained(self.pretrained_weights)
+        self.encoder = AutoModel.from_pretrained(self.pretrained_weights).to(self.device)
         #set encoder to eval mode
         self.encoder.eval()
+        self.encoder_name = f"bert_{pretrained_weights}"
 
     def doc2idx(self, doc):
         bertify = "[CLS] {} [SEP]"  
@@ -54,7 +62,7 @@ class BERTEncoder(Encoder):
     def encode(self, inpath, outpath, window_size):
         inpath=inpath+"pkl/"        
         
-        print("\n> BERT features ({})".format(self.pretrained_model))        
+        print("\n> BERT features ({})".format(self.pretrained_weights))        
         
         users = []
         for user_path in glob.glob(inpath+"/idx_*"):
@@ -97,23 +105,46 @@ class BERTEncoder(Encoder):
             sys.stdout.write("\r> features | user: {}".format(user_id))
             sys.stdout.flush()
             # from pdb import set_trace; set_trace()
-            with open(outpath+f"/{user_id}_pos.npy", "wb") as fi:
+            with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
                 np.savez(fi, *windows)        
             # print(docs_tensor)        
         return users
 
 class ELMoEncoder(Encoder):
 
-    def __init__(self, encoder_batchsize, device) -> None:
+    def __init__(self, encoder_batchsize, device, pretrained_weights="small") -> None:
         super().__init__()
-        options_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_options.json"
-        weight_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5"
+        pw = {
+                "small": {
+                    "options": "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_options.json",
+
+                    "weights": "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5"
+                },
+
+                "medium": {
+                    "options": "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x2048_256_2048cnn_1xhighway/elmo_2x2048_256_2048cnn_1xhighway_options.json",
+
+                    "weights": "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x2048_256_2048cnn_1xhighway/elmo_2x2048_256_2048cnn_1xhighway_weights.hdf5"
+                },
+
+                "original": {
+                    "options": "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway_5.5B/elmo_2x4096_512_2048cnn_2xhighway_5.5B_options.json",
+
+                    "weights": "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway_5.5B/elmo_2x4096_512_2048cnn_2xhighway_5.5B_weights.hdf5"
+                }
+        }
+        # options_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_options.json"
+        # weight_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5"
+
+        options_file = pw[pretrained_weights]["options"] 
+        weight_file = pw[pretrained_weights]["weights"] 
 
         elmo = Elmo(options_file=options_file, weight_file=weight_file, 
                     num_output_representations=1, dropout=0)
         self.encoder = elmo.to(device)
         self.encoder_batchsize = encoder_batchsize
         self.device = device
+        self.encoder_name = "elmo_"+pretrained_weights
 
     def encode(self, inpath, outpath, window_size):
         inpath=inpath+"pkl/"        
@@ -159,16 +190,17 @@ class ELMoEncoder(Encoder):
             
             sys.stdout.write("\r> features | user: {}".format(user_id))
             sys.stdout.flush()
-            with open(outpath+f"/{user_id}_pos.npy", "wb") as fi:
+            with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
                 np.savez(fi, *windows)        
             # print(docs_tensor)        
         return users
                     
 class FastTextEncoder(Encoder):
 
-    def __init__(self, embeddings_path) -> None:
+    def __init__(self, pretrained_weights) -> None:
         super().__init__()
-        self.encoder = fasttext.load_model(embeddings_path)       
+        self.encoder = fasttext.load_model(pretrained_weights)       
+        self.encoder_name = "fasttext"
 
     def encode(self, inpath, outpath, window_size):
         inpath=inpath+"pkl/"        
@@ -203,16 +235,17 @@ class FastTextEncoder(Encoder):
         
 
 class W2VEncoder(Encoder):
-    def __init__(self, inpath, outpath, embeddings_path, emb_encoding, 
+    def __init__(self, inpath, outpath, pretrained_weights, emb_encoding, 
                 min_word_freq=5, max_vocab_size=None) -> None:
         super().__init__()
         self.vocab = None
         self.inpath = inpath
         self.outpath = outpath
-        self.embeddings_path = embeddings_path
+        self.pretrained_weights = pretrained_weights
         self.emb_encoding = emb_encoding        
         self.min_word_freq = min_word_freq
         self.max_vocab_size = max_vocab_size
+        self.encoder_name = "w2v"
 
     def doc2idx(self, doc):
         
@@ -249,7 +282,7 @@ class W2VEncoder(Encoder):
                     windows.append(E_window)
                 except:
                     from ipdb import set_trace; set_trace()
-            with open(outpath+f"/{user_id}_pos.npy", "wb") as fi:
+            with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
                 np.savez(fi, *windows)        
             sys.stdout.write("\r> features | user: {}".format(user_id))
             sys.stdout.flush()
@@ -277,7 +310,7 @@ class W2VEncoder(Encoder):
                                                     max_vocab_size=self.max_vocab_size)        
             vocab_len = len(vocab)
             #extract word embeddings
-            E, vocab_redux = extract_word_embeddings(self.embeddings_path, vocab, 
+            E, vocab_redux = extract_word_embeddings(self.pretrained_weights, vocab, 
                                                     encoding=self.emb_encoding)
             #vocab_redux has only words for which an embedding was found
             print("[vocab size: {} > {}]".format(vocab_len,len(vocab_redux)))
