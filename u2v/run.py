@@ -9,9 +9,9 @@ import json
 def cmdline_args():
     parser = argparse.ArgumentParser(description="Train User2Vec")
     
-    parser.add_argument('-input', type=str, required=True, help='input folder')    
-    parser.add_argument('-output', type=str, required=True, help='path of the output')    
     parser.add_argument('-conf_path', type=str, required=True, help='config json file')    
+    parser.add_argument('-docs', type=str, help='documents file')    
+    parser.add_argument('-output', type=str, required=True, help='path of the output')    
     parser.add_argument('-train', action="store_true", 
                         help='train mode (assumes data was already extracted)')
     parser.add_argument('-build', action="store_true", 
@@ -81,7 +81,7 @@ if __name__ == "__main__" :
                               device=args.device)
         
     elif encoder_type == "w2v":
-        encoder = W2VEncoder(inpath=args.input, outpath=output_path, 
+        encoder = W2VEncoder(inpath=args.docs, outpath=output_path, 
                             embeddings_path=conf["pretrained_weights"], 
                             emb_encoding=conf.get("pretrained_weights","utf8"),
                             min_word_freq=conf.get("min_word_freq", 1),
@@ -100,7 +100,7 @@ if __name__ == "__main__" :
     
     if (not args.train and not args.encode) or args.build:
         print("> prepare data")
-        build_data(args.input, output_path, encoder, 
+        build_data(args.docs, output_path, encoder, 
                 random_seed=conf["seed"], 
                 min_docs_user=conf.get("min_docs_user", 1),
                 max_docs_user=conf.get("max_docs_user"), 
@@ -118,13 +118,8 @@ if __name__ == "__main__" :
         else:
             device = torch.device(args.device)
         
-        # if args.run_id == "auto":            
-        #     run_id = f"{args.epochs}_{args.margin}_{args.lr}"
-        #     # from ipdb import set_trace; set_trace()
-        # else:
-        #     run_id = args.run_id
         print("> train")
-        # from ipdb import set_trace;set_trace()
+        
         train_model(output_path, encoder, 
                     run_id=conf.get("run_id", ""),
                     batch_size=conf.get("batch_size", 1),

@@ -12,6 +12,7 @@ from collections import Counter
 import fasttext
 from tadat.core import embeddings
 import os
+from tqdm import tqdm
 BERT_MAX_INPUT = 512
 ELMO_MAX_INPUT = 128
 class Encoder(ABC):
@@ -65,50 +66,106 @@ class BERTEncoder(Encoder):
         print("\n> BERT features ({})".format(self.pretrained_weights))        
         
         users = []
-        for user_path in glob.glob(inpath+"/idx_*"):
-            with open(user_path, "rb") as fi:
-                user_id, doc_lens, docs = pickle.load(fi) 
-            users.append(user_id)        
-            encoded_tensors = []
-            n_batches = math.ceil(len(docs)/self.encoder_batchsize)
-            for j in range(n_batches):
-                batch_docs = docs[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
-                batch_lens = doc_lens[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
-                if len(batch_docs) > 0:
-                    sys.stdout.write("\rbatch:{}/{} (size: {})".format(j+1,n_batches, str(len(batch_docs))))
-                    sys.stdout.flush()
-                    #encode it
-                    docs_tensor = torch.cat([torch.tensor([t]) for t in batch_docs])
-                    segments_tensor = torch.zeros_like(docs_tensor)                           
-                    docs_tensor = docs_tensor.to(self.device)
-                    segments_tensor = segments_tensor.to(self.device)                    
-                    with torch.no_grad():              
-                        model_out = self.encoder(docs_tensor, token_type_ids=segments_tensor)    
-                        Z, cls = model_out.to_tuple()
-                        # from pdb import set_trace; set_trace()
-                        Z = Z.cpu().numpy()
-                    #append encoded docs
-                    for l, z in zip(batch_lens,Z):
-                        #get rid of [CLS] [SEP] and padding dimensions
-                        z_trunc = z[1:(l-1)]
-                        encoded_tensors.append(z_trunc)
-            #convert all doc tensors into a single mega tensor
-            mega_tensor = np.concatenate(encoded_tensors, axis=0)        
-            #slice the mega tensor into slices of window_size
-            n_windows = math.ceil(mega_tensor.shape[0]/window_size)
-            # from pdb import set_trace; set_trace()
-            windows = []
-            for j in range(n_windows):
-                batch_docs = mega_tensor[window_size*j:window_size*(j+1) , :]
-                windows.append(batch_docs)
-            
-            sys.stdout.write("\r> features | user: {}".format(user_id))
-            sys.stdout.flush()
-            # from pdb import set_trace; set_trace()
-            with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
-                np.savez(fi, *windows)        
+        # for user_path in glob.glob(inpath+"/idx_*"):
+        data = glob.glob(inpath+"/idx_*")
+        
+        with tqdm(data, unit="users") as pbar:
+            for user_path in pbar:
+                with open(user_path, "rb") as fi:
+                    user_id, doc_lens, docs = pickle.load(fi) 
+                users.append(user_id)        
+                encoded_tensors = []
+                n_batches = math.ceil(len(docs)/self.encoder_batchsize)
+                for j in range(n_batches):
+                    batch_docs = docs[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
+                    batch_lens = doc_lens[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
+                    if len(batch_docs) > 0:
+                        # sys.stdout.write("\rbatch:{}/{} (size: {})".format(j+1,n_batches, str(len(batch_docs))))
+                        # sys.stdout.flush()
+                        pbar.set_description(f"user: {user_id} | batch:{j+1}/{n_batches} ({len(batch_docs)})")
+                        #encode it
+                        docs_tensor = torch.cat([torch.tensor([t]) for t in batch_docs])
+                        segments_tensor = torch.zeros_like(docs_tensor)                           
+                        docs_tensor = docs_tensor.to(self.device)
+                        segments_tensor = segments_tensor.to(self.device)                    
+                        with torch.no_grad():              
+                            model_out = self.encoder(docs_tensor, token_type_ids=segments_tensor)    
+                            Z, cls = model_out.to_tuple()
+                            # from pdb import set_trace; set_trace()
+                            Z = Z.cpu().numpy()
+                        #append encoded docs
+                        for l, z in zip(batch_lens,Z):
+                            #get rid of [CLS] [SEP] and padding dimensions
+                            z_trunc = z[1:(l-1)]
+                            encoded_tensors.append(z_trunc)
+                #convert all doc tensors into a single mega tensor
+                mega_tensor = np.concatenate(encoded_tensors, axis=0)        
+                #slice the mega tensor into slices of window_size
+                n_windows = math.ceil(mega_tensor.shape[0]/window_size)
+                # from pdb import set_trace; set_trace()
+                windows = []
+                for j in range(n_windows):
+                    batch_docs = mega_tensor[window_size*j:window_size*(j+1) , :]
+                    windows.append(batch_docs)
+                
+                # sys.stdout.write("\r> features | user: {}".format(user_id))
+                # sys.stdout.flush()
+                # from pdb import set_trace; set_trace()
+                with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
+                    np.savez(fi, *windows)        
             # print(docs_tensor)        
         return users
+
+    # def encode(self, inpath, outpath, window_size):
+    #     inpath=inpath+"pkl/"        
+        
+    #     print("\n> BERT features ({})".format(self.pretrained_weights))        
+        
+    #     users = []
+    #     for user_path in glob.glob(inpath+"/idx_*"):
+    #         with open(user_path, "rb") as fi:
+    #             user_id, doc_lens, docs = pickle.load(fi) 
+    #         users.append(user_id)        
+    #         encoded_tensors = []
+    #         n_batches = math.ceil(len(docs)/self.encoder_batchsize)
+    #         for j in range(n_batches):
+    #             batch_docs = docs[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
+    #             batch_lens = doc_lens[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
+    #             if len(batch_docs) > 0:
+    #                 sys.stdout.write("\rbatch:{}/{} (size: {})".format(j+1,n_batches, str(len(batch_docs))))
+    #                 sys.stdout.flush()
+    #                 #encode it
+    #                 docs_tensor = torch.cat([torch.tensor([t]) for t in batch_docs])
+    #                 segments_tensor = torch.zeros_like(docs_tensor)                           
+    #                 docs_tensor = docs_tensor.to(self.device)
+    #                 segments_tensor = segments_tensor.to(self.device)                    
+    #                 with torch.no_grad():              
+    #                     model_out = self.encoder(docs_tensor, token_type_ids=segments_tensor)    
+    #                     Z, cls = model_out.to_tuple()
+    #                     # from pdb import set_trace; set_trace()
+    #                     Z = Z.cpu().numpy()
+    #                 #append encoded docs
+    #                 for l, z in zip(batch_lens,Z):
+    #                     #get rid of [CLS] [SEP] and padding dimensions
+    #                     z_trunc = z[1:(l-1)]
+    #                     encoded_tensors.append(z_trunc)
+    #         #convert all doc tensors into a single mega tensor
+    #         mega_tensor = np.concatenate(encoded_tensors, axis=0)        
+    #         #slice the mega tensor into slices of window_size
+    #         n_windows = math.ceil(mega_tensor.shape[0]/window_size)
+    #         # from pdb import set_trace; set_trace()
+    #         windows = []
+    #         for j in range(n_windows):
+    #             batch_docs = mega_tensor[window_size*j:window_size*(j+1) , :]
+    #             windows.append(batch_docs)
+            
+    #         sys.stdout.write("\r> features | user: {}".format(user_id))
+    #         sys.stdout.flush()
+    #         # from pdb import set_trace; set_trace()
+    #         with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
+    #             np.savez(fi, *windows)        
+    #         # print(docs_tensor)        
+    #     return users
 
 class ELMoEncoder(Encoder):
 
@@ -152,49 +209,51 @@ class ELMoEncoder(Encoder):
         print("\n> ELMo features")        
         
         users = []
-        for user_path in glob.glob(inpath+"/idx_*"):
-            with open(user_path, "rb") as fi:
-                user_id, doc_lens, docs = pickle.load(fi) 
-            users.append(user_id)        
-            encoded_docs = []
-            n_batches = math.ceil(len(docs)/self.encoder_batchsize)
-            for j in range(n_batches):
-                batch_docs = docs[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
-                batch_lens = doc_lens[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
-                if len(batch_docs) > 0:
-                    char_idxs = batch_to_ids(batch_docs).to(self.device)         
-                    char_idxs = char_idxs[:,:ELMO_MAX_INPUT,:]
-                    sys.stdout.write("\rbatch:{}/{} (size: {})".format(j+1,n_batches, str(len(batch_docs))))
-                    sys.stdout.flush()
-                    # from pdb import set_trace; set_trace()           
-                    #encode it                    
-                    with torch.no_grad():   
-                        output = self.encoder(char_idxs)
-                    Z = output["elmo_representations"][0]
-                    Z = Z.cpu().numpy()
-                    #append encoded docs
-                    for l, z in zip(batch_lens,Z):
-                        #get rid of padding dimensions
-                        z_trunc = z[:l]
-                        encoded_docs.append(z_trunc)
-                        # from ipdb import set_trace; set_trace()
-            #convert all doc tensors into a single mega tensor
-            mega_tensor = np.concatenate(encoded_docs, axis=0)        
-            #slice the mega tensor into slices of window_size
-            n_windows = math.ceil(mega_tensor.shape[0]/window_size)
-            # from pdb import set_trace; set_trace()
-            windows = []
-            for j in range(n_windows):
-                batch_docs = mega_tensor[window_size*j:window_size*(j+1) , :]
-                windows.append(batch_docs)
-            
-            sys.stdout.write("\r> features | user: {}".format(user_id))
-            sys.stdout.flush()
-            with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
-                np.savez(fi, *windows)        
+        data = glob.glob(inpath+"/idx_*")
+        
+        with tqdm(data, unit="users") as pbar:
+            for user_path in pbar:
+                with open(user_path, "rb") as fi:
+                    user_id, doc_lens, docs = pickle.load(fi) 
+                users.append(user_id)        
+                encoded_docs = []
+                n_batches = math.ceil(len(docs)/self.encoder_batchsize)
+                for j in range(n_batches):
+                    batch_docs = docs[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
+                    batch_lens = doc_lens[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
+                    if len(batch_docs) > 0:
+                        char_idxs = batch_to_ids(batch_docs).to(self.device)         
+                        char_idxs = char_idxs[:,:ELMO_MAX_INPUT,:]
+                        pbar.set_description(f"user: {user_id} | batch:{j+1}/{n_batches} ({len(batch_docs)})")
+                        #encode it                    
+                        with torch.no_grad():   
+                            output = self.encoder(char_idxs)
+                        Z = output["elmo_representations"][0]
+                        Z = Z.cpu().numpy()
+                        #append encoded docs
+                        for l, z in zip(batch_lens,Z):
+                            #get rid of padding dimensions
+                            z_trunc = z[:l]
+                            encoded_docs.append(z_trunc)
+                            # from ipdb import set_trace; set_trace()
+                #convert all doc tensors into a single mega tensor
+                mega_tensor = np.concatenate(encoded_docs, axis=0)        
+                #slice the mega tensor into slices of window_size
+                n_windows = math.ceil(mega_tensor.shape[0]/window_size)
+                # from pdb import set_trace; set_trace()
+                windows = []
+                for j in range(n_windows):
+                    batch_docs = mega_tensor[window_size*j:window_size*(j+1) , :]
+                    windows.append(batch_docs)
+                
+                # print("\r> features | user: {}".format(user_id))
+                # sys.stdout.flush()
+                with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
+                    np.savez(fi, *windows)        
             # print(docs_tensor)        
         return users
-                    
+
+    
 class FastTextEncoder(Encoder):
 
     def __init__(self, pretrained_weights) -> None:
@@ -208,28 +267,32 @@ class FastTextEncoder(Encoder):
         print("\n> FastText features")        
         
         users = []
-        for user_path in glob.glob(inpath+"/idx_*"):
-            with open(user_path, "rb") as fi:
-                user_id, doc_lens, docs = pickle.load(fi) 
-            users.append(user_id)        
-            encoded_words = []
-            for doc in docs:
-                encoded_words += [self.encoder[w] for w in doc]
+        data = glob.glob(inpath+"/idx_*")
+        
+        with tqdm(data, unit="users") as pbar:
+            for user_path in pbar:
+                with open(user_path, "rb") as fi:
+                    user_id, doc_lens, docs = pickle.load(fi) 
+                pbar.set_description(f"user: {user_id} ({len(docs)})")
+                users.append(user_id)        
+                encoded_words = []
+                for doc in docs:
+                    encoded_words += [self.encoder[w] for w in doc]
 
-            #convert all tensors into a single mega tensor
-            mega_tensor = np.stack(encoded_words)        
-            #slice the mega tensor into slices of window_size
-            # from ipdb import set_trace; set_trace()
-            n_windows = math.ceil(mega_tensor.shape[0]/window_size)
-            windows = []
-            for j in range(n_windows):
-                batch_docs = mega_tensor[window_size*j:window_size*(j+1) , :]
-                windows.append(batch_docs)
-            
-            sys.stdout.write("\r> features | user: {}".format(user_id))
-            sys.stdout.flush()
-            with open(outpath+f"/{user_id}_pos.npy", "wb") as fi:
-                np.savez(fi, *windows)        
+                #convert all tensors into a single mega tensor
+                mega_tensor = np.stack(encoded_words)        
+                #slice the mega tensor into slices of window_size
+                # from ipdb import set_trace; set_trace()
+                n_windows = math.ceil(mega_tensor.shape[0]/window_size)
+                windows = []
+                for j in range(n_windows):
+                    batch_docs = mega_tensor[window_size*j:window_size*(j+1) , :]
+                    windows.append(batch_docs)
+                
+                # sys.stdout.write("\r> features | user: {}".format(user_id))
+                # sys.stdout.flush()
+                with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
+                    np.savez(fi, *windows)        
             # print(docs_tensor)        
         return users
         
