@@ -258,14 +258,17 @@ class FastTextEncoder(Encoder):
 
     def __init__(self, pretrained_weights) -> None:
         super().__init__()
-        self.encoder = fasttext.load_model(pretrained_weights)       
+        self.pretrained_weights = pretrained_weights
         self.encoder_name = "fasttext"
+        self.encoder = None
 
-    def encode(self, inpath, outpath, window_size):
+    def load_weights(self):
+        self.encoder = fasttext.load_model(self.pretrained_weights)       
+
+    def encode(self, inpath, outpath, window_size):        
+        if not self.encoder: self.load_weights()
         inpath=inpath+"pkl/"        
-        
-        print("\n> FastText features")        
-        
+        print("\n> FastText features")                
         users = []
         data = glob.glob(inpath+"/idx_*")
         

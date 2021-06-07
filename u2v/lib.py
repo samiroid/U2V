@@ -15,10 +15,12 @@ import random
 import shutil
 import sys
 from pathlib import Path
+from ipdb.__main__ import set_trace
 import numpy as np
 from numpy.random import RandomState
 import time
 from u2v.model import User2Vec
+from torch.utils.tensorboard import SummaryWriter
 
 DEFAULT_WINDOW_SIZE=64
 SHUFFLE_SEED=489
@@ -152,7 +154,7 @@ def mean_word_embeddings(path, users, encoder_name):
     print("> mean word embeddings")
     rng = RandomState(SHUFFLE_SEED)   
     fname_pos = path+"/pkl/{}_{}_pos.npy"
-    fname_mean = path+"/txt/mean_{}_{}.txt"
+    fname_mean = path+"/txt/{}_mean_{}.txt"
     for user in users:
         curr_user = np.load(fname_pos.format(encoder_name, user))                
         #sum of all embeddings
@@ -196,13 +198,13 @@ def encode_users(path, encoder, window_size=DEFAULT_WINDOW_SIZE):
     mean_word_embeddings(path, users, encoder.encoder_name)
     
 
-def stich_embeddings(inpath, encoder_name, outpath, emb_dim, run_id=""):
+def stich_embeddings(inpath, encoder_name, outpath, emb_dim, run_id):
     if run_id:
-        user_embeddings = list(glob.glob(f"{inpath}/{run_id}_*"))
+        user_embeddings = list(glob.glob(f"{inpath}/{encoder_name}_{run_id}_*"))
         outpath = f"{outpath}U_{encoder_name}_{run_id}.txt"        
-    else:        
-        user_embeddings = list(glob.glob(f"{inpath}/*"))
-        outpath = f"{outpath}U_{encoder_name}.txt"
+    # else:        
+    #     user_embeddings = list(glob.glob(f"{inpath}/*"))
+    #     outpath = f"{outpath}U_{encoder_name}.txt"
 
     print("[writing embeddings to {}]".format(outpath))
     with open(outpath,"w") as fo:            
@@ -212,29 +214,28 @@ def stich_embeddings(inpath, encoder_name, outpath, emb_dim, run_id=""):
                 l = fi.readlines()[1]
             fo.write(l)
 
-def train_model(path, encoder, run_id=None, batch_size=100, epochs=20, initial_lr=0.001, margin=1, validation_split=0.8, reset=False, device=None):  
+def train_model(path, encoder, run_id, logs_path=None, batch_size=100, epochs=20, initial_lr=0.001, margin=1, validation_split=0.8, reset=False, device=None):  
     print("\ntraining...")
     st = time.time()
-    # path = f"{path}/{encoder_type}/"
-    txt_path = path+"/txt/"
-    if reset:
-        shutil.rmtree(txt_path, ignore_errors=True)    
+    txt_path = path+"/txt/"    
     if not os.path.exists(os.path.dirname(txt_path)):
         os.makedirs(os.path.dirname(txt_path))       
     with open(path+"/pkl/users.txt") as fi:
         users = [u.replace("\n","") for u in fi.readlines()]
-    
-    if run_id == "auto":            
-        run_id = f"{epochs}_{margin}_{initial_lr}"
-
     random.shuffle(users)
-    cache = set([os.path.basename(f).replace(".txt","") for f in Path(txt_path).iterdir()])
-    # from ipdb import set_trace; set_trace()
+    trained_users = glob.glob(f"{txt_path}/{encoder.encoder_name}_{run_id}*")
+    cache = []
+    if reset:
+        #remove all existing files
+        for f in trained_users: 
+            os.remove(f)        
+    else:    
+        cache = set([os.path.basename(f).replace(".txt","") for f in  trained_users])    
     emb_dim = None    
     val_perfs = []
-    for user in users:    
-        #account for cases where a run_id is used to prefix the file
-        user_check = run_id+"-"+user if run_id else user
+    tensorboard = SummaryWriter(logs_path)
+    for user in users:        
+        user_check = f"{encoder.encoder_name}_{run_id}_{user}"  
         if user_check in cache:
             print("cached embedding: {}".format(user))
             continue
@@ -245,14 +246,13 @@ def train_model(path, encoder, run_id=None, batch_size=100, epochs=20, initial_l
         neg_samples = np.load(f_neg, allow_pickle=True)
         
         emb_dim = pos_samples[pos_samples.files[0]].shape[1] 
-        f = User2Vec(user, emb_dim, txt_path, margin=margin, initial_lr=initial_lr, 
-                    epochs=epochs, device=device, batch_size=batch_size, validation_split=validation_split, run_id=run_id,
-                    encoder_id=encoder.encoder_name)   
+        f = User2Vec(user, encoder.encoder_name,run_id, emb_dim, txt_path,
+                    logs_path=logs_path, margin=margin, initial_lr=initial_lr, epochs=epochs, device=device, batch_size=batch_size, validation_split=validation_split)   
         val_perf = f.fit(pos_samples, neg_samples)
         val_perfs.append(val_perf)        
         f_pos.close()
         f_neg.close()
-        
+        # tensorboard.add_scalars("val prob",{user:val_perf})    
     ft = time.time()
     et = ft - st
     print(f"total time: {round(et,3)}")
@@ -260,6 +260,7 @@ def train_model(path, encoder, run_id=None, batch_size=100, epochs=20, initial_l
     min_val = 0
     mean_val = 0
     std_val = 0
+    tensorboard.add_histogram("val prob",np.array(val_perfs))
     if len(val_perfs) > 0:
         max_val = round(max(val_perfs),3)
         min_val = round(min(val_perfs),3)
