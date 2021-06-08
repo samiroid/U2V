@@ -1,3 +1,5 @@
-torch
+torch==1.6.0
 numpy
 git+https://github.com/samiroid/TADAT.git
+allennlp
+fasttext

@@ -5,7 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import init
 from numpy.random import RandomState
-from tadat.core.helpers import colstr
+# from tadat.core.helpers import colstr
 import math
 import sys
 import time

@@ -19,5 +19,5 @@ setuptools.setup(
     ],
     packages=setuptools.find_packages(),
     python_requires='>=3.6',
-    install_requires=["torch","numpy"]
+    install_requires=["torch","numpy","allennlp","fasttext","transformers","tqdm"]
 )

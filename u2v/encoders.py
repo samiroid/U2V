@@ -13,6 +13,7 @@ import fasttext
 from tadat.core import embeddings
 import os
 from tqdm import tqdm
+
 BERT_MAX_INPUT = 512
 ELMO_MAX_INPUT = 128
 class Encoder(ABC):
@@ -25,9 +26,7 @@ class Encoder(ABC):
     @abstractmethod
     def encode(self, inpath, outpath, window_size):
         pass
-
     
-
 class BERTEncoder(Encoder):    
 
     def __init__(self, pretrained_weights, encoder_batchsize, device) -> None:
@@ -73,7 +72,11 @@ class BERTEncoder(Encoder):
             for user_path in pbar:
                 with open(user_path, "rb") as fi:
                     user_id, doc_lens, docs = pickle.load(fi) 
-                users.append(user_id)        
+                users.append(user_id)    
+                fname = outpath+f"/{self.encoder_name}_{user_id}_pos.npy"
+                if os.path.isfile(fname):
+                    pbar.set_description(f"user {user_id} encoded")
+                    continue
                 encoded_tensors = []
                 n_batches = math.ceil(len(docs)/self.encoder_batchsize)
                 for j in range(n_batches):
@@ -111,7 +114,9 @@ class BERTEncoder(Encoder):
                 # sys.stdout.write("\r> features | user: {}".format(user_id))
                 # sys.stdout.flush()
                 # from pdb import set_trace; set_trace()
-                with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
+                # with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
+                #     np.savez(fi, *windows)        
+                with open(fname, "wb") as fi:
                     np.savez(fi, *windows)        
             # print(docs_tensor)        
         return users
