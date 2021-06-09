@@ -32,8 +32,13 @@ if __name__ == "__main__" :
     print("** U2V **")
     pprint.pprint(vars(args))
     
-    print("\n\n")
-    
+    print("")
+    device = None
+    if args.device == "auto":
+        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    else:
+        device = torch.device(args.device)
+
     with open(args.conf_path) as fi:
             conf = json.load(fi)
     print(" > confs: ")
@@ -48,12 +53,12 @@ if __name__ == "__main__" :
     if encoder_type == "bert":
         encoder = BERTEncoder(pretrained_weights=conf["pretrained_weights"], 
                               encoder_batchsize=conf.get("encoder_batch_size", 128), 
-                              device=args.device)
+                              device=device)
         
     elif encoder_type == "elmo":
         encoder = ELMoEncoder(pretrained_weights=conf["pretrained_weights"], 
                               encoder_batchsize=conf.get("encoder_batch_size", 128), 
-                              device=args.device)
+                              device=device)
 
     elif encoder_type == "fasttext":
         encoder = FastTextEncoder(pretrained_weights=conf["pretrained_weights"] )
@@ -81,12 +86,6 @@ if __name__ == "__main__" :
                     window_size=conf["window_size"], cache=args.cache)        
 
     if (not args.build and not args.encode) or args.train:
-        device = None
-        if args.device == "auto":
-            device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-        else:
-            device = torch.device(args.device)
-        
         print("> train")
         #get configs
         run_id = conf.get("run_id","auto")
