@@ -1,13 +1,3 @@
-# import lib_static
-# import lib_context
-# import encoders 
-
-# import argparse
-# # from ipdb import set_trace
-# # import codecs
-# from collections import Counter
-# import math
-
 import glob
 import os
 import pickle
@@ -20,31 +10,12 @@ from numpy.random import RandomState
 import time
 from u2v.model import User2Vec
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 DEFAULT_WINDOW_SIZE=64
 SHUFFLE_SEED=489
 DEFAULT_BATCH_SIZE=128
 MIN_DOC_LEN=2
-
-# def build_data(inpath, outpath, encoder_type, embeddings_path=None, emb_encoding="latin-1", 
-#                 min_word_freq=5, max_vocab_size=None, random_seed=SHUFFLE_SEED, 
-#                 min_docs_user=2, reset=False):
-    
-#     outpath = f"{outpath}/{encoder_type}/"
-#     pkl_path=outpath+"pkl/"
-#     users_path=pkl_path+"users/"          
-#     if reset:
-#         shutil.rmtree(pkl_path, ignore_errors=True)
-#         shutil.rmtree(users_path, ignore_errors=True)
-
-#     if not os.path.exists(os.path.dirname(users_path)):
-#         os.makedirs(os.path.dirname(users_path))   
-    
-#     if encoder_type == "w2v":
-#         lib_static.build_data(inpath, outpath, embeddings_path, emb_encoding, 
-#                 min_word_freq, max_vocab_size, random_seed, min_docs_user)
-#     elif encoder_type == "bert":
-#         lib_context.build_data(inpath, outpath, random_seed, min_docs_user)
 
 def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED, 
                 min_docs_user=1, max_docs_user=None, reset=False):
@@ -73,8 +44,7 @@ def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED,
             try:
                 user, doc = line.replace("\"", "").replace("\n","").replace("'","").split("\t")            
             except ValueError:
-                print(f"skipped line {line}")
-                # from ipdb import set_trace; set_trace()
+                print(f"skipped line {line}")                
             #if we reach a new user, save the current one
             if user!= curr_user:
                 if len(user_docs) >= min_docs_user:                    
@@ -117,37 +87,42 @@ def save_user(user_id, docs, doc_lens, rng, outpath, max_docs=None):
     with open(outpath+"idx_"+user_id, "wb") as fo:        
         pickle.dump([user_id, doc_lens_shuf, docs_shuf], fo)
 
-def remix_samples(path, users, encoder_name):
+def remix_samples(path, users, encoder_name, cache=False):
     print("\n> remix negative samples")
     rng = RandomState(SHUFFLE_SEED)   
     fname_pos = path+"{}_{}_pos.npy"
     fname_neg = path+"{}_{}_neg.npy"
-    for user in users:
-        curr_user = np.load(fname_pos.format(encoder_name, user))
-        other_users = users.copy()
-        other_users.remove(user)
-        #for each window 
-        windows = []
-        for x in curr_user.files:
-            done=False
-            curr_window_size = curr_user[x].shape[0]
-            while not done:
-                #sample a random user
-                rand = rng.randint(len(other_users))
-                rand_user = other_users[rand]
-                rand_window = sample_user_window(fname_pos.format(encoder_name, rand_user), rng)
-                if rand_window.shape[0] < curr_window_size:
-                    # print("skip")
-                    continue                
-                elif rand_window.shape[0] > curr_window_size:
-                    # print("trim")
-                    rand_window = rand_window[:curr_window_size,:]                
-                windows.append(rand_window)
-                done=True
-        # print(len(curr_user.files))
-        # from ipdb import set_trace; set_trace()
-        with open(fname_neg.format(encoder_name, user), "wb") as fi:
-            np.savez(fi, *windows)        
+
+    with tqdm(users, unit="users") as pbar:
+        for user in pbar:
+        # for user in users:
+            if cache and os.path.isfile(fname_neg.format(encoder_name, user)):
+                pbar.set_description(f"user {user} in cache")
+                continue    
+            # else:
+            #     pbar.set_description(f"sampling user {user}")
+            curr_user = np.load(fname_pos.format(encoder_name, user))
+            other_users = users.copy()
+            other_users.remove(user)
+            #for each window 
+            windows = []
+            for x in curr_user.files:
+                done=False
+                curr_window_size = curr_user[x].shape[0]
+                while not done:
+                    #sample a random user
+                    rand = rng.randint(len(other_users))
+                    rand_user = other_users[rand]
+                    rand_window = sample_user_window(fname_pos.format(encoder_name, rand_user), rng)
+                    if rand_window.shape[0] < curr_window_size:                    
+                        continue                
+                    elif rand_window.shape[0] > curr_window_size:
+                        #trim if needed
+                        rand_window = rand_window[:curr_window_size,:]                
+                    windows.append(rand_window)
+                    done=True        
+            with open(fname_neg.format(encoder_name, user), "wb") as fi:
+                np.savez(fi, *windows)        
     
 def mean_word_embeddings(path, users, encoder_name):
     print("> mean word embeddings")
@@ -184,7 +159,7 @@ def sample_user_window(path, rng):
     # print(rand_window)
     return x[rand_window]
 
-def encode_users(path, encoder, window_size=DEFAULT_WINDOW_SIZE):
+def encode_users(path, encoder, window_size=DEFAULT_WINDOW_SIZE, cache=True):
     # path = f"{path}/{encoder_type}/"
     pkl_path= f"{path}/pkl/"
     txt_path= f"{path}/txt/"
@@ -192,18 +167,15 @@ def encode_users(path, encoder, window_size=DEFAULT_WINDOW_SIZE):
         os.makedirs(os.path.dirname(pkl_path)) 
     if not os.path.exists(os.path.dirname(txt_path)):
         os.makedirs(os.path.dirname(txt_path)) 
-    users = encoder.encode(path, pkl_path, window_size)    
-    remix_samples(pkl_path, users, encoder.encoder_name)
+    users = encoder.encode(path, pkl_path, window_size, cache)    
+    remix_samples(pkl_path, users, encoder.encoder_name, cache)
     mean_word_embeddings(path, users, encoder.encoder_name)
     
 
 def stich_embeddings(inpath, encoder_name, outpath, emb_dim, run_id):
     if run_id:
         user_embeddings = list(glob.glob(f"{inpath}/{encoder_name}_{run_id}_*"))
-        outpath = f"{outpath}U_{encoder_name}_{run_id}.txt"        
-    # else:        
-    #     user_embeddings = list(glob.glob(f"{inpath}/*"))
-    #     outpath = f"{outpath}U_{encoder_name}.txt"
+        outpath = f"{outpath}U_{encoder_name}_{run_id}.txt"            
 
     print("[writing embeddings to {}]".format(outpath))
     with open(outpath,"w") as fo:            
@@ -213,7 +185,7 @@ def stich_embeddings(inpath, encoder_name, outpath, emb_dim, run_id):
                 l = fi.readlines()[1]
             fo.write(l)
 
-def train_model(path, encoder, run_id, logs_path=None, batch_size=100, epochs=20, initial_lr=0.001, margin=1, validation_split=0.8, reset=False, device=None):  
+def train_model(path, encoder, run_id, logs_path=None, batch_size=100, epochs=20, initial_lr=0.001, margin=1, validation_split=0.8, cache=False, device=None):  
     print("\ntraining...")
     st = time.time()
     txt_path = path+"/txt/"    
@@ -222,20 +194,20 @@ def train_model(path, encoder, run_id, logs_path=None, batch_size=100, epochs=20
     with open(path+"/pkl/users.txt") as fi:
         users = [u.replace("\n","") for u in fi.readlines()]
     random.shuffle(users)
-    trained_users = glob.glob(f"{txt_path}/{encoder.encoder_name}_{run_id}*")
-    cache = []
-    if reset:
+    tmp_users = glob.glob(f"{txt_path}/{encoder.encoder_name}_{run_id}*")
+    cached_users = []
+    if not cache:
         #remove all existing files
-        for f in trained_users: 
+        for f in tmp_users: 
             os.remove(f)        
     else:    
-        cache = set([os.path.basename(f).replace(".txt","") for f in  trained_users])    
+        cached_users = set([os.path.basename(f).replace(".txt","") for f in  tmp_users])    
     emb_dim = None    
     val_perfs = []
     tensorboard = SummaryWriter(logs_path)
     for user in users:        
         user_check = f"{encoder.encoder_name}_{run_id}_{user}"  
-        if user_check in cache:
+        if user_check in cached_users:
             print("cached embedding: {}".format(user))
             continue
         user_fname = "{}/pkl/{}_{}_{}.npy" 

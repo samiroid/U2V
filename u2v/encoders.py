@@ -24,7 +24,7 @@ class Encoder(ABC):
         return doc_len, doc_splt
     
     @abstractmethod
-    def encode(self, inpath, outpath, window_size):
+    def encode(self, inpath, outpath, window_size, cache=True):
         pass
     
 class BERTEncoder(Encoder):    
@@ -59,7 +59,7 @@ class BERTEncoder(Encoder):
         # print(tokenizer.max_model_input_sizes)    
         return doc_len, idxs
     
-    def encode(self, inpath, outpath, window_size):
+    def encode(self, inpath, outpath, window_size, cache=True):
         inpath=inpath+"pkl/"        
         
         print("\n> BERT features ({})".format(self.pretrained_weights))        
@@ -74,17 +74,15 @@ class BERTEncoder(Encoder):
                     user_id, doc_lens, docs = pickle.load(fi) 
                 users.append(user_id)    
                 fname = outpath+f"/{self.encoder_name}_{user_id}_pos.npy"
-                if os.path.isfile(fname):
-                    pbar.set_description(f"user {user_id} encoded")
+                if cache and os.path.isfile(fname):
+                    pbar.set_description(f"user {user_id} in cache")
                     continue
                 encoded_tensors = []
                 n_batches = math.ceil(len(docs)/self.encoder_batchsize)
                 for j in range(n_batches):
                     batch_docs = docs[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
                     batch_lens = doc_lens[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
-                    if len(batch_docs) > 0:
-                        # sys.stdout.write("\rbatch:{}/{} (size: {})".format(j+1,n_batches, str(len(batch_docs))))
-                        # sys.stdout.flush()
+                    if len(batch_docs) > 0:                        
                         pbar.set_description(f"user: {user_id} | batch:{j+1}/{n_batches} ({len(batch_docs)})")
                         #encode it
                         docs_tensor = torch.cat([torch.tensor([t]) for t in batch_docs])
@@ -111,66 +109,12 @@ class BERTEncoder(Encoder):
                     batch_docs = mega_tensor[window_size*j:window_size*(j+1) , :]
                     windows.append(batch_docs)
                 
-                # sys.stdout.write("\r> features | user: {}".format(user_id))
-                # sys.stdout.flush()
-                # from pdb import set_trace; set_trace()
-                # with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
-                #     np.savez(fi, *windows)        
                 with open(fname, "wb") as fi:
                     np.savez(fi, *windows)        
             # print(docs_tensor)        
         return users
 
-    # def encode(self, inpath, outpath, window_size):
-    #     inpath=inpath+"pkl/"        
-        
-    #     print("\n> BERT features ({})".format(self.pretrained_weights))        
-        
-    #     users = []
-    #     for user_path in glob.glob(inpath+"/idx_*"):
-    #         with open(user_path, "rb") as fi:
-    #             user_id, doc_lens, docs = pickle.load(fi) 
-    #         users.append(user_id)        
-    #         encoded_tensors = []
-    #         n_batches = math.ceil(len(docs)/self.encoder_batchsize)
-    #         for j in range(n_batches):
-    #             batch_docs = docs[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
-    #             batch_lens = doc_lens[self.encoder_batchsize*j:self.encoder_batchsize*(j+1)]
-    #             if len(batch_docs) > 0:
-    #                 sys.stdout.write("\rbatch:{}/{} (size: {})".format(j+1,n_batches, str(len(batch_docs))))
-    #                 sys.stdout.flush()
-    #                 #encode it
-    #                 docs_tensor = torch.cat([torch.tensor([t]) for t in batch_docs])
-    #                 segments_tensor = torch.zeros_like(docs_tensor)                           
-    #                 docs_tensor = docs_tensor.to(self.device)
-    #                 segments_tensor = segments_tensor.to(self.device)                    
-    #                 with torch.no_grad():              
-    #                     model_out = self.encoder(docs_tensor, token_type_ids=segments_tensor)    
-    #                     Z, cls = model_out.to_tuple()
-    #                     # from pdb import set_trace; set_trace()
-    #                     Z = Z.cpu().numpy()
-    #                 #append encoded docs
-    #                 for l, z in zip(batch_lens,Z):
-    #                     #get rid of [CLS] [SEP] and padding dimensions
-    #                     z_trunc = z[1:(l-1)]
-    #                     encoded_tensors.append(z_trunc)
-    #         #convert all doc tensors into a single mega tensor
-    #         mega_tensor = np.concatenate(encoded_tensors, axis=0)        
-    #         #slice the mega tensor into slices of window_size
-    #         n_windows = math.ceil(mega_tensor.shape[0]/window_size)
-    #         # from pdb import set_trace; set_trace()
-    #         windows = []
-    #         for j in range(n_windows):
-    #             batch_docs = mega_tensor[window_size*j:window_size*(j+1) , :]
-    #             windows.append(batch_docs)
-            
-    #         sys.stdout.write("\r> features | user: {}".format(user_id))
-    #         sys.stdout.flush()
-    #         # from pdb import set_trace; set_trace()
-    #         with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
-    #             np.savez(fi, *windows)        
-    #         # print(docs_tensor)        
-    #     return users
+   
 
 class ELMoEncoder(Encoder):
 
@@ -195,9 +139,7 @@ class ELMoEncoder(Encoder):
                     "weights": "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x4096_512_2048cnn_2xhighway_5.5B/elmo_2x4096_512_2048cnn_2xhighway_5.5B_weights.hdf5"
                 }
         }
-        # options_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_options.json"
-        # weight_file = "https://s3-us-west-2.amazonaws.com/allennlp/models/elmo/2x1024_128_2048cnn_1xhighway/elmo_2x1024_128_2048cnn_1xhighway_weights.hdf5"
-
+        
         options_file = pw[pretrained_weights]["options"] 
         weight_file = pw[pretrained_weights]["weights"] 
 
@@ -208,7 +150,7 @@ class ELMoEncoder(Encoder):
         self.device = device
         self.encoder_name = "elmo_"+pretrained_weights
 
-    def encode(self, inpath, outpath, window_size):
+    def encode(self, inpath, outpath, window_size, cache=True):
         inpath=inpath+"pkl/"        
         
         print("\n> ELMo features")        
@@ -220,7 +162,11 @@ class ELMoEncoder(Encoder):
             for user_path in pbar:
                 with open(user_path, "rb") as fi:
                     user_id, doc_lens, docs = pickle.load(fi) 
-                users.append(user_id)        
+                users.append(user_id)    
+                fname = outpath+f"/{self.encoder_name}_{user_id}_pos.npy"
+                if cache and os.path.isfile(fname):
+                    pbar.set_description(f"user {user_id} in cache")
+                    continue    
                 encoded_docs = []
                 n_batches = math.ceil(len(docs)/self.encoder_batchsize)
                 for j in range(n_batches):
@@ -251,11 +197,8 @@ class ELMoEncoder(Encoder):
                     batch_docs = mega_tensor[window_size*j:window_size*(j+1) , :]
                     windows.append(batch_docs)
                 
-                # print("\r> features | user: {}".format(user_id))
-                # sys.stdout.flush()
-                with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
+                with open(fname, "wb") as fi:
                     np.savez(fi, *windows)        
-            # print(docs_tensor)        
         return users
 
     
@@ -270,7 +213,7 @@ class FastTextEncoder(Encoder):
     def load_weights(self):
         self.encoder = fasttext.load_model(self.pretrained_weights)       
 
-    def encode(self, inpath, outpath, window_size):        
+    def encode(self, inpath, outpath, window_size, cache=True):        
         if not self.encoder: self.load_weights()
         inpath=inpath+"pkl/"        
         print("\n> FastText features")                
@@ -283,6 +226,10 @@ class FastTextEncoder(Encoder):
                     user_id, doc_lens, docs = pickle.load(fi) 
                 pbar.set_description(f"user: {user_id} ({len(docs)})")
                 users.append(user_id)        
+                fname = outpath+f"/{self.encoder_name}_{user_id}_pos.npy"
+                if cache and os.path.isfile(fname):
+                    pbar.set_description(f"user {user_id} in cache")
+                    continue    
                 encoded_words = []
                 for doc in docs:
                     encoded_words += [self.encoder[w] for w in doc]
@@ -299,7 +246,7 @@ class FastTextEncoder(Encoder):
                 
                 # sys.stdout.write("\r> features | user: {}".format(user_id))
                 # sys.stdout.flush()
-                with open(outpath+f"/{self.encoder_name}_{user_id}_pos.npy", "wb") as fi:
+                with open(fname, "wb") as fi:
                     np.savez(fi, *windows)        
             # print(docs_tensor)        
         return users
@@ -317,6 +264,8 @@ class W2VEncoder(Encoder):
         self.min_word_freq = min_word_freq
         self.max_vocab_size = max_vocab_size
         self.encoder_name = "w2v"
+        print("this encoder needs to be update")
+        raise NotImplementedError
 
     def doc2idx(self, doc):
         

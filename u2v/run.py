@@ -18,10 +18,8 @@ def cmdline_args():
                         help='build training data (does not train)')
     parser.add_argument('-encode', action="store_true", 
                         help='encode training data (does not train)')
-    parser.add_argument('-reset_cache', action="store_true", 
-                        help='reset cached users (i.e. all are trained)')
-    parser.add_argument('-reset', action="store_true", 
-                        help='reset embeddings that were already computed')
+    parser.add_argument('-cache', action="store_true", 
+                        help='read from cached if data was already processed')    
     parser.add_argument('-device', type=str, default="auto", help='device')
     
     
@@ -80,7 +78,7 @@ if __name__ == "__main__" :
     if (not args.train and not args.build) or args.encode:
         print("> encode data")        
         encode_users(path=output_path, encoder=encoder,
-                    window_size=conf["window_size"])        
+                    window_size=conf["window_size"], cache=args.cache)        
 
     if (not args.build and not args.encode) or args.train:
         device = None
@@ -113,5 +111,5 @@ if __name__ == "__main__" :
                     batch_size=batch_size,
                     validation_split=val_split,
                     logs_path=logs_path,
-                    reset=args.reset_cache,                    
+                    cache=args.cache,                    
                     device=device)
