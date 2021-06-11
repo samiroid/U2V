@@ -114,8 +114,10 @@ class BERTEncoder(Encoder):
             # print(docs_tensor)        
         return users
 
-   
-
+class ClinicalBertEncoder(BERTEncoder):
+    def __init__(self, encoder_batchsize, device) -> None:
+        super().__init__("clinicalbert", encoder_batchsize, device)
+        
 class ELMoEncoder(Encoder):
 
     def __init__(self, encoder_batchsize, device, pretrained_weights="small") -> None:

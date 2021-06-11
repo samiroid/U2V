@@ -1,7 +1,7 @@
 import argparse
 import os
 from u2v.lib import build_data, train_model, encode_users
-from u2v.encoders import BERTEncoder, W2VEncoder, ELMoEncoder, FastTextEncoder
+from u2v.encoders import BERTEncoder, ClinicalBertEncoder, W2VEncoder, ELMoEncoder, FastTextEncoder
 import torch 
 import pprint
 import json
@@ -20,6 +20,8 @@ def cmdline_args():
                         help='encode training data (does not train)')
     parser.add_argument('-cache', action="store_true", 
                         help='read from cached if data was already processed')    
+    parser.add_argument('-rebuild', action="store_true", 
+                        help='re-create indices')    
     parser.add_argument('-device', type=str, default="auto", help='device')
     
     
@@ -54,15 +56,16 @@ if __name__ == "__main__" :
         encoder = BERTEncoder(pretrained_weights=conf["pretrained_weights"], 
                               encoder_batchsize=conf.get("encoder_batch_size", 128), 
                               device=device)
-        
+    elif encoder_type == "clinicalbert":
+        encoder = ClinicalBertEncoder(
+                              encoder_batchsize=conf.get("encoder_batch_size", 128), 
+                              device=device)
     elif encoder_type == "elmo":
         encoder = ELMoEncoder(pretrained_weights=conf["pretrained_weights"], 
                               encoder_batchsize=conf.get("encoder_batch_size", 128), 
                               device=device)
-
     elif encoder_type == "fasttext":
         encoder = FastTextEncoder(pretrained_weights=conf["pretrained_weights"] )
-    
     elif encoder_type == "w2v":
         encoder = W2VEncoder(inpath=args.docs, outpath=output_path, 
                             embeddings_path=conf["pretrained_weights"], 
@@ -78,7 +81,7 @@ if __name__ == "__main__" :
                 random_seed=conf["seed"], 
                 min_docs_user=conf.get("min_docs_user", 1),
                 max_docs_user=conf.get("max_docs_user"), 
-                reset=args.reset)
+                reset=args.rebuild)
     
     if (not args.train and not args.build) or args.encode:
         print("> encode data")        
