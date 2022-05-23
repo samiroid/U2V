@@ -66,3 +66,9 @@ def word2vec_encoder(docs, E):
 
 def BERT_encoder(docs, encoder_args):
     raise NotImplementedError
+
+
+class Word2VecEncoder():
+
+    def __init__(self, embeddings_path, m):
+        pass
