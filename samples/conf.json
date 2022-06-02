@@ -1,0 +1,19 @@
+{
+    "encoder_type":"elmo",
+    "run_id":"sample",
+    "pretrained_weights":"small",        
+    "encoder_batch_size" : 128,    
+    "min_docs_user": 1,
+    "window_size" : 128,
+    "seed" : 426,     
+    "epochs": 20,
+    "val_split": 0.1,
+    "lr": 0.02,
+    "margin": 2,
+    "batch_size": 32
+}
+
+
+
+    
+

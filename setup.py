@@ -7,8 +7,8 @@ setuptools.setup(
     name="U2V", 
     version="0.0.1",
     author="Silvio Amir",
-    author_email="silvio.aam@gmail.com",
-    description="U2V",
+    author_email="s.amir@northeastern.edu",
+    description="User2Vec",
     long_description=long_description,
     long_description_content_type="text/markdown",
     url="https://github.com/samiroid/U2V",
@@ -19,5 +19,11 @@ setuptools.setup(
     ],
     packages=setuptools.find_packages(),
     python_requires='>=3.6',
-    install_requires=["torch","numpy","allennlp","fasttext","transformers","tqdm"]
+    install_requires=["torch","numpy","allennlp","fasttext","transformers","tqdm","tensorboard","git+https://github.com/samiroid/TADAT.git"]
 )
+
+
+
+
+
+

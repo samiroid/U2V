@@ -2,7 +2,6 @@ from abc import ABC, abstractmethod
 from allennlp.modules.elmo import Elmo, batch_to_ids
 import numpy as np
 import torch
-from torch._C import set_num_threads
 from transformers import AutoTokenizer, AutoModel
 import math
 import pickle
@@ -16,19 +15,29 @@ from tqdm import tqdm
 
 BERT_MAX_INPUT = 512
 ELMO_MAX_INPUT = 128
-class Encoder(ABC):
 
+"""
+    Encoders module provide methods to transform documents into word embeddings using 
+    different types encoders (e.g., word2vec, fasttext, ELMo, and BERT)
+"""
+
+class Encoder(ABC):
+    """
+        Abstract encoder class
+    """
     def doc2idx(self, doc):
         doc_splt = doc.split(" ")
         doc_len = len(doc_splt)
         return doc_len, doc_splt
     
     @abstractmethod
-    def encode(self, inpath, outpath, window_size, cache=True):
+    def encode(self, inpath, outpath, window_size):
         pass
     
 class BERTEncoder(Encoder):    
-
+    """
+        BERT encoder
+    """
     def __init__(self, pretrained_weights, encoder_batchsize, device) -> None:
         super().__init__()
         weights = {
@@ -59,8 +68,8 @@ class BERTEncoder(Encoder):
         # print(tokenizer.max_model_input_sizes)    
         return doc_len, idxs
     
-    def encode(self, inpath, outpath, window_size, cache=True):
-        inpath=inpath+"pkl/"        
+    def encode(self, inpath, outpath, window_size):
+        # inpath=inpath+"pkl/"        
         
         print("\n> BERT features ({})".format(self.pretrained_weights))        
         
@@ -74,7 +83,7 @@ class BERTEncoder(Encoder):
                     user_id, doc_lens, docs = pickle.load(fi) 
                 users.append(user_id)    
                 fname = outpath+f"/{self.encoder_name}_{user_id}_pos.npy"
-                if cache and os.path.isfile(fname):
+                if os.path.isfile(fname):
                     pbar.set_description(f"user {user_id} in cache")
                     continue
                 encoded_tensors = []
@@ -115,10 +124,17 @@ class BERTEncoder(Encoder):
         return users
 
 class ClinicalBertEncoder(BERTEncoder):
+    """
+        ClinicalBERT encoder
+    """
     def __init__(self, encoder_batchsize, device) -> None:
         super().__init__("clinicalbert", encoder_batchsize, device)
         
 class ELMoEncoder(Encoder):
+
+    """
+        ELMo encoder
+    """
 
     def __init__(self, encoder_batchsize, device, pretrained_weights="small") -> None:
         super().__init__()
@@ -152,8 +168,8 @@ class ELMoEncoder(Encoder):
         self.device = device
         self.encoder_name = "elmo_"+pretrained_weights
 
-    def encode(self, inpath, outpath, window_size, cache=True):
-        inpath=inpath+"pkl/"        
+    def encode(self, inpath, outpath, window_size):
+        # inpath=inpath+"pkl/"        
         
         print("\n> ELMo features")        
         
@@ -166,7 +182,7 @@ class ELMoEncoder(Encoder):
                     user_id, doc_lens, docs = pickle.load(fi) 
                 users.append(user_id)    
                 fname = outpath+f"/{self.encoder_name}_{user_id}_pos.npy"
-                if cache and os.path.isfile(fname):
+                if os.path.isfile(fname):
                     pbar.set_description(f"user {user_id} in cache")
                     continue    
                 encoded_docs = []
@@ -206,6 +222,10 @@ class ELMoEncoder(Encoder):
     
 class FastTextEncoder(Encoder):
 
+    """
+        Fasttext encoder
+    """
+
     def __init__(self, pretrained_weights) -> None:
         super().__init__()
         self.pretrained_weights = pretrained_weights
@@ -215,9 +235,9 @@ class FastTextEncoder(Encoder):
     def load_weights(self):
         self.encoder = fasttext.load_model(self.pretrained_weights)       
 
-    def encode(self, inpath, outpath, window_size, cache=True):        
+    def encode(self, inpath, outpath, window_size):        
         if not self.encoder: self.load_weights()
-        inpath=inpath+"pkl/"        
+        # inpath=inpath+"pkl/"        
         print("\n> FastText features")                
         users = []
         data = glob.glob(inpath+"/idx_*")
@@ -229,7 +249,7 @@ class FastTextEncoder(Encoder):
                 pbar.set_description(f"user: {user_id} ({len(docs)})")
                 users.append(user_id)        
                 fname = outpath+f"/{self.encoder_name}_{user_id}_pos.npy"
-                if cache and os.path.isfile(fname):
+                if os.path.isfile(fname):
                     pbar.set_description(f"user {user_id} in cache")
                     continue    
                 encoded_words = []
@@ -255,6 +275,11 @@ class FastTextEncoder(Encoder):
         
 
 class W2VEncoder(Encoder):
+
+    """
+        Word2Vec encoder
+    """
+
     def __init__(self, inpath, outpath, pretrained_weights, emb_encoding, 
                 min_word_freq=5, max_vocab_size=None) -> None:
         super().__init__()
@@ -282,7 +307,7 @@ class W2VEncoder(Encoder):
         return doc_len, np.array(doc_idx, dtype=np.int32) 
 
     def encode(self, inpath, outpath, window_size):
-        inpath=inpath+"pkl/"
+        # inpath=inpath+"pkl/"
         print("\n> word2vec features")    
         with open(inpath+"word_emb.npy", "rb") as f:
             E = np.load(f)        
@@ -345,6 +370,8 @@ class W2VEncoder(Encoder):
         
         return vocab
  
+
+#auxiliary methods for word2vec embeddings
 def extract_vocabulary(inpath, min_word_freq=5, max_vocab_size=None):    
     print(" > extracting vocabulary")
     word_counter = Counter()

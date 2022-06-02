@@ -17,15 +17,20 @@ SHUFFLE_SEED=489
 DEFAULT_BATCH_SIZE=128
 MIN_DOC_LEN=2
 
-def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED, 
+def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED,       
                 min_docs_user=1, max_docs_user=None, reset=False):
     
+    """
+        Prepares the raw data to train the user embedding model
+        Input is a file with the format: USER\tTEXT
+        The output is a file per user with all the tokens converted to indices
+    """
     
-    pkl_path=outpath+"pkl/"    
+    idx_path=outpath+"idx/"    
     if reset:
-        shutil.rmtree(pkl_path, ignore_errors=True)    
-    if not os.path.exists(os.path.dirname(pkl_path)):
-        os.makedirs(os.path.dirname(pkl_path))   
+        shutil.rmtree(idx_path, ignore_errors=True)    
+    if not os.path.exists(os.path.dirname(idx_path)):
+        os.makedirs(os.path.dirname(idx_path))   
 
     rng = np.random.RandomState(random_seed)    
     with open(inpath) as fi:
@@ -48,7 +53,7 @@ def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED,
             #if we reach a new user, save the current one
             if user!= curr_user:
                 if len(user_docs) >= min_docs_user:                    
-                    save_user(curr_user, user_docs, doc_lens, rng, pkl_path, max_docs_user)
+                    save_user(curr_user, user_docs, doc_lens, rng, idx_path, max_docs_user)
                     users.append(curr_user)
                 else:
                     print("> IGNORED user: {}  ({})".format(user,len(user_docs)))
@@ -64,12 +69,12 @@ def build_data(inpath, outpath, encoder, random_seed=SHUFFLE_SEED,
             doc_lens.append(doc_len)
         #save last user
         if len(user_docs) >= min_docs_user:
-            save_user(curr_user, user_docs, doc_lens, rng, pkl_path, max_docs_user)
+            save_user(curr_user, user_docs, doc_lens, rng, idx_path, max_docs_user)
             users.append(curr_user)
         else:
             print("> IGNORED user: {}  ({})".format(user,len(user_docs)))    
     print()
-    with open(pkl_path+"users.txt","w") as fo:
+    with open(idx_path+"users.txt","w") as fo:
         fo.write("\n".join(users))
 
 def save_user(user_id, docs, doc_lens, rng, outpath, max_docs=None):        
@@ -87,8 +92,8 @@ def save_user(user_id, docs, doc_lens, rng, outpath, max_docs=None):
     with open(outpath+"idx_"+user_id, "wb") as fo:        
         pickle.dump([user_id, doc_lens_shuf, docs_shuf], fo)
 
-def remix_samples(path, users, encoder_name, cache=False):
-    print("\n> remix negative samples")
+def negative_samples(path, users, encoder_name):
+    print("\n> negative samples")
     rng = RandomState(SHUFFLE_SEED)   
     fname_pos = path+"{}_{}_pos.npy"
     fname_neg = path+"{}_{}_neg.npy"
@@ -96,7 +101,7 @@ def remix_samples(path, users, encoder_name, cache=False):
     with tqdm(users, unit="users") as pbar:
         for user in pbar:
         # for user in users:
-            if cache and os.path.isfile(fname_neg.format(encoder_name, user)):
+            if os.path.isfile(fname_neg.format(encoder_name, user)):
                 pbar.set_description(f"user {user} in cache")
                 continue    
             # else:
@@ -124,11 +129,14 @@ def remix_samples(path, users, encoder_name, cache=False):
             with open(fname_neg.format(encoder_name, user), "wb") as fi:
                 np.savez(fi, *windows)        
     
-def mean_word_embeddings(path, users, encoder_name):
+def mean_word_embeddings(pkl_path, txt_path, out_path, users, encoder_name):
     print("> mean word embeddings")
     rng = RandomState(SHUFFLE_SEED)   
-    fname_pos = path+"/pkl/{}_{}_pos.npy"
-    fname_mean = path+"/txt/{}_mean_{}.txt"
+    #(positive) sample filename
+    fname_pos = pkl_path+"/{}_{}_pos.npy"
+    # mean embedding filename
+    fname_mean = txt_path+"/{}_mean_{}.txt"
+    emb_dim = None
     for user in users:
         curr_user = np.load(fname_pos.format(encoder_name, user))                
         #sum of all embeddings
@@ -147,8 +155,8 @@ def mean_word_embeddings(path, users, encoder_name):
             fo.write('%d %d\n' % (1, emb_dim))            
             e = ' '.join(map(lambda x: str(x), mean_emb))
             fo.write('%s %s\n' % (user, e))
+    
         
-    stich_embeddings(path+"/txt/", encoder_name, path, emb_dim, "mean")
 
 
 def sample_user_window(path, rng):
@@ -159,20 +167,27 @@ def sample_user_window(path, rng):
     # print(rand_window)
     return x[rand_window]
 
-def encode_users(path, encoder, window_size=DEFAULT_WINDOW_SIZE, cache=True):
+def encode_users(path, encoder, window_size=DEFAULT_WINDOW_SIZE, reset=False):
     # path = f"{path}/{encoder_type}/"
-    pkl_path= f"{path}/pkl/"
-    txt_path= f"{path}/txt/"
-    if not os.path.exists(os.path.dirname(pkl_path)):
-        os.makedirs(os.path.dirname(pkl_path)) 
-    if not os.path.exists(os.path.dirname(txt_path)):
-        os.makedirs(os.path.dirname(txt_path)) 
-    users = encoder.encode(path, pkl_path, window_size, cache)    
-    remix_samples(pkl_path, users, encoder.encoder_name, cache)
-    mean_word_embeddings(path, users, encoder.encoder_name)
+    pkl_path= f"{path}/pkl/"    
+    idx_path = f"{path}/idx/"    
+    # txt_path= f"{path}/txt/"        
     
+    assert os.path.exists(os.path.dirname(idx_path)), "Could not find vectorized data. Did you run -build?"
 
-def stich_embeddings(inpath, encoder_name, outpath, emb_dim, run_id):
+    if reset:
+        #delete the folder
+        shutil.rmtree(pkl_path, ignore_errors=True)                  
+        print("reset...")
+
+    if not os.path.exists(os.path.dirname(pkl_path)):
+        os.makedirs(os.path.dirname(pkl_path))     
+
+    users = encoder.encode(idx_path, pkl_path, window_size)    
+    #compute negative samples
+    negative_samples(pkl_path, users, encoder.encoder_name)
+
+def join_embeddings(inpath, outpath, encoder_name, emb_dim, run_id):
     if run_id:
         user_embeddings = list(glob.glob(f"{inpath}/{encoder_name}_{run_id}_*"))
         outpath = f"{outpath}U_{encoder_name}_{run_id}.txt"            
@@ -185,23 +200,26 @@ def stich_embeddings(inpath, encoder_name, outpath, emb_dim, run_id):
                 l = fi.readlines()[1]
             fo.write(l)
 
-def train_model(path, encoder, run_id, logs_path=None, batch_size=100, epochs=20, initial_lr=0.001, margin=1, validation_split=0.8, cache=False, device=None):  
-    print("\ntraining...")
+def train_model(path, encoder, run_id, logs_path=None, batch_size=100, epochs=20, initial_lr=0.001, margin=1, validation_split=0.8, reset=False, device=None):  
+    print("\n> training ")
     st = time.time()
     txt_path = path+"/txt/"    
+    pkl_path = path+"/pkl/"    
+    idx_path = path+"/idx/"    
+    assert os.path.exists(os.path.dirname(pkl_path)), "Could not find encoded data. Did you run -encode?"
+
+    if reset:
+        shutil.rmtree(txt_path)
+        print("reset...")
     if not os.path.exists(os.path.dirname(txt_path)):
         os.makedirs(os.path.dirname(txt_path))       
-    with open(path+"/pkl/users.txt") as fi:
+    #list with all the user ids
+    with open(idx_path+"/users.txt") as fi:
         users = [u.replace("\n","") for u in fi.readlines()]
     random.shuffle(users)
     tmp_users = glob.glob(f"{txt_path}/{encoder.encoder_name}_{run_id}*")
-    cached_users = []
-    if not cache:
-        #remove all existing files
-        for f in tmp_users: 
-            os.remove(f)        
-    else:    
-        cached_users = set([os.path.basename(f).replace(".txt","") for f in  tmp_users])    
+    cached_users = []    
+    cached_users = set([os.path.basename(f).replace(".txt","") for f in  tmp_users])    
     emb_dim = None    
     val_perfs = []
     tensorboard = SummaryWriter(logs_path)
@@ -210,10 +228,10 @@ def train_model(path, encoder, run_id, logs_path=None, batch_size=100, epochs=20
         if user_check in cached_users:
             print("cached embedding: {}".format(user))
             continue
-        user_fname = "{}/pkl/{}_{}_{}.npy" 
-        f_pos = open(user_fname.format(path, encoder.encoder_name, user, "pos"), "rb")
+        user_fname = "{}/{}_{}_{}.npy" 
+        f_pos = open(user_fname.format(pkl_path, encoder.encoder_name, user, "pos"), "rb")
         pos_samples = np.load(f_pos, allow_pickle=True)            
-        f_neg = open(user_fname.format(path, encoder.encoder_name, user, "neg"), "rb")
+        f_neg = open(user_fname.format(pkl_path, encoder.encoder_name, user, "neg"), "rb")
         neg_samples = np.load(f_neg, allow_pickle=True)
         
         emb_dim = pos_samples[pos_samples.files[0]].shape[1] 
@@ -231,14 +249,16 @@ def train_model(path, encoder, run_id, logs_path=None, batch_size=100, epochs=20
     min_val = 0
     mean_val = 0
     std_val = 0
-    tensorboard.add_histogram("val prob",np.array(val_perfs))
     if len(val_perfs) > 0:
+        tensorboard.add_histogram("val prob",np.array(val_perfs))   
         max_val = round(max(val_perfs),3)
         min_val = round(min(val_perfs),3)
         mean_val = round(np.mean(val_perfs),3)
         std_val = round(np.std(val_perfs),3)
     print(f"avg val: {mean_val} ({std_val}) [{max_val};{min_val}]")
     if emb_dim:        
-        stich_embeddings(txt_path, encoder.encoder_name, path, emb_dim, run_id)
+        join_embeddings(txt_path, path, encoder.encoder_name, emb_dim, run_id)
 
-    
+    #compute mean word embeddings
+    mean_word_embeddings(pkl_path, txt_path, path, users, encoder.encoder_name)
+    join_embeddings(txt_path, path, encoder.encoder_name, emb_dim, "mean")
