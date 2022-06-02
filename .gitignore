@@ -127,6 +127,6 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
-DATA/*
+DATA
 .DS_Store
 u2v/model_bkp.py
