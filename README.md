@@ -1,6 +1,6 @@
 # U2V 
 
-User2Vec is a neural model that learns static user representations based on a collections of texts. This is a repo is re-implementation of the [original model]() in pytorch and with support for more modern text encoders (i.e. [Fasttext](https://fasttext.cc/docs/en/english-vectors.html), [ELMo](https://allenai.org/allennlp/software/elmo) and [Transformers](https://huggingface.co/docs/transformers/index)). Refer to the [publications](#citations) for details on the model.
+User2Vec is a neural model that learns static user representations based on a collections of texts. This is a repo is re-implementation of the [original model](https://github.com/samiroid/usr2vec) in pytorch and with support for more modern text encoders (i.e. [Fasttext](https://fasttext.cc/docs/en/english-vectors.html), [ELMo](https://allenai.org/allennlp/software/elmo) and [Transformers](https://huggingface.co/docs/transformers/index)). Refer to the [publications](#citations) for details on the model.
 
 ### Install
 
@@ -36,7 +36,7 @@ User2Vec can be configured with the following parameters for the **pipeline**, *
 
 - `encoder_type (elmo)`: encoder type (elmo, fasttext, bert, clinicalbert)
 - `seed (426)`: random seed 
-- `pretrained_weights (base)`: pretrained weights (**ELMO:** {*small, medium, original*}; [BERT](https://huggingface.co/models), **FastText**: *[path to embeddings]*)
+- `pretrained_weights (small)`: pretrained weights (**ELMO:** {*small, medium, original*}; [BERT](https://huggingface.co/models), **FastText**: *[path to embeddings]*)
 - `encoder_batch_size (256)`: batch size for the encoder module (relevant when using GPU)
 - `max_docs_user (10)`: maximum number of documents per user
 - `window_size (128)`: window size 
