@@ -1,4 +1,4 @@
-# U2V 
+# User2Vec 
 
 User2Vec is a neural model that learns static user representations based on a collections of texts. This is a repo is re-implementation of the [original model](https://github.com/samiroid/usr2vec) in pytorch and with support for more modern text encoders (i.e. [Fasttext](https://fasttext.cc/docs/en/english-vectors.html), [ELMo](https://allenai.org/allennlp/software/elmo) and [Transformers](https://huggingface.co/docs/transformers/index)). Refer to the [publications](#citations) for details on the model.
 
