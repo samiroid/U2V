@@ -40,11 +40,12 @@ class BERTEncoder(Encoder):
     """
     def __init__(self, pretrained_weights, encoder_batchsize, device) -> None:
         super().__init__()
-        weights = {
-        "clinicalbert": "emilyalsentzer/Bio_ClinicalBERT",
-        "base": "bert-base-uncased"
-        }
-        self.pretrained_weights = weights.get(pretrained_weights, pretrained_weights)
+        # weights = {
+        # "clinicalbert": "emilyalsentzer/Bio_ClinicalBERT",
+        # "base": "bert-base-uncased"
+        # }
+        # self.pretrained_weights = weights.get(pretrained_weights, pretrained_weights)
+        self.pretrained_weights = pretrained_weights
         self.encoder_batchsize = encoder_batchsize
         self.device = device        
         self.tokenizer = AutoTokenizer.from_pretrained(self.pretrained_weights)
@@ -123,12 +124,12 @@ class BERTEncoder(Encoder):
             # print(docs_tensor)        
         return users
 
-class ClinicalBertEncoder(BERTEncoder):
-    """
-        ClinicalBERT encoder
-    """
-    def __init__(self, encoder_batchsize, device) -> None:
-        super().__init__("clinicalbert", encoder_batchsize, device)
+# class ClinicalBertEncoder(BERTEncoder):
+#     """
+#         ClinicalBERT encoder
+#     """
+#     def __init__(self, encoder_batchsize, device) -> None:
+#         super().__init__("clinicalbert", encoder_batchsize, device)
         
 class ELMoEncoder(Encoder):
 

@@ -4,9 +4,20 @@ User2Vec is a neural model that learns static user representations based on a co
 
 ### Install
 
-User2Vec can be installed directly from the repository or manually after downloading the code  
+User2Vec can be installed directly from the repository or manually, after downloading the code  
 - **repository**: `pip install git+https://github.com/samiroid/U2V.git`
 - **manually**: `pip install [PATH TO CODE]` or `python [PATH TO CODE]/setup.py install` 
+
+### Encoders
+
+User2Vec learns user representations from word representations therefore the first step of training User2Vec is mapping words into embeddings using encoders.
+Encoders are based on available implementations and can leverage pretrained weights. 
+This implementation supports the following encoders:
+
+* Word2Vec: static word embeddings 
+* FastText: static sub-word word embeddings using the[FastText](https://fasttext.cc/) library
+* ELMo: contextualized token embeddings based on the ELMo model as  [ELMo](ttps://allenai.org/allennlp/software/elmo) which can be used pretrained weights: *small*, *medium*, and *original* as described [here](https://allenai.org/allennlp/software/elmo)
+* [PTLM](https://huggingface.co/): Transformer-based Pre-trained Language Models  using any of the pretrained weights available on HuggingFace's model [repository](https://huggingface.co/models)
 
 ### Run
 
@@ -28,18 +39,25 @@ User2Vec can be configured with the following parameters for the **pipeline**, *
 - `-output`: path to output folder
 - `-device (cpu)`: device (cpu or cuda)
 - `-train`: train model
-- `-build`: buid training data
-- `-encode`: encode word tokens
+- `-build`: build training data
+- `-encode`: encode word/tokens (i.e. map to word embeddings)
 - `-reset`: rebuild training data
 
 **Encoder Parameters**:
 
-- `encoder_type (elmo)`: encoder type (elmo, fasttext, bert, clinicalbert)
+- `encoder_type (elmo)`: encoder type (elmo, fasttext, bert)
 - `seed (426)`: random seed 
-- `pretrained_weights (small)`: pretrained weights (**ELMO:** {*small, medium, original*}; [BERT](https://huggingface.co/models), **FastText**: *[path to embeddings]*)
+- `pretrained_weights`: pretrained weights (see notes below)
 - `encoder_batch_size (256)`: batch size for the encoder module (relevant when using GPU)
-- `max_docs_user (10)`: maximum number of documents per user
+- `max_docs_user`: maximum number of documents per user
 - `window_size (128)`: window size 
+
+
+> The ElMo encoder comes from [AllenNLP](https://allenai.org/allennlp/software/elmo) and can be set to use the available pretrained weights (small, medium, original)
+
+> You can download Fasttext embeddings trained on Twitter data [here](https://github.com/FredericGodin/TwitterEmbeddings)
+
+> BERT encoder uses Huggingface model repository. It uses the AutoModel class so the pretrained weights can be the name of a specific model 
 
 **Model Parameters**:
 

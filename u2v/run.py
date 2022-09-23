@@ -40,7 +40,7 @@ if __name__ == "__main__" :
         "encoder_type":"elmo",
         "seed" : 426, 
         "pretrained_weights" : "small",
-        "encoder_batch_size" : 256,        
+        "encoder_batch_size" : 256,     
         "window_size" : 128
     }    
 

@@ -19,7 +19,8 @@ setuptools.setup(
     ],
     packages=setuptools.find_packages(),
     python_requires='>=3.6',
-    install_requires=["torch","numpy","allennlp","fasttext","transformers","tqdm","tensorboard","git+https://github.com/samiroid/TADAT.git"]
+    install_requires=["torch","numpy","allennlp","fasttext","transformers","tqdm","tensorboard","TADAT"],
+    dependency_links=["git+https://github.com/samiroid/TADAT.git#egg=TADAT"]
 )
 
 
