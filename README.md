@@ -21,14 +21,13 @@ This implementation supports the following encoders:
 
 ### Run
 
-User2Vec can be run as a pipeline with 3 steps:
-1. build: Preprocess and vectorize documents
-2. encode: Encode tokens with pretrained word embedding representations
-3. train: Train user2vec model to learn user embedding representations
+User2Vec can be run as a pipeline with 2 steps:
+1. build: Preprocess, vectorize and encode documents
+2. train: Train user2vec model to learn user embedding representations
 
 This allows for faster experimentation with different configurations. To run the pipeline on the included sample dataset with default configuration use
 
-`python -m u2v.run -docs DATA/sample.txt  -output [OUTPUT_PATH]  -conf_path confs/sample.json -build -encode -train -device cpu`
+`python -m u2v.run -docs samples/data.txt  -output [OUTPUT_PATH]  -conf_path samples/conf.json -build -train -device cpu`
 
 User2Vec can be configured with the following parameters for the **pipeline**, **encoder**, and **model** (default values in parentheses)
 
@@ -40,7 +39,6 @@ User2Vec can be configured with the following parameters for the **pipeline**, *
 - `-device (cpu)`: device (cpu or cuda)
 - `-train`: train model
 - `-build`: build training data
-- `-encode`: encode word/tokens (i.e. map to word embeddings)
 - `-reset`: rebuild training data
 
 **Encoder Parameters**:

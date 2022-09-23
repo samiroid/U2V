@@ -1,7 +1,7 @@
 import argparse
 import os
 from u2v.lib import build_data, train_model, encode_users
-from u2v.encoders import BERTEncoder, ClinicalBertEncoder, W2VEncoder, ELMoEncoder, FastTextEncoder
+from u2v.encoders import BERTEncoder, W2VEncoder, ELMoEncoder, FastTextEncoder
 import torch 
 import pprint
 import json
@@ -15,9 +15,7 @@ def cmdline_args():
     parser.add_argument('-train', action="store_true", 
                         help='train mode (assumes data was already encoded)')
     parser.add_argument('-build', action="store_true", 
-                        help='build training data (does not train)')
-    parser.add_argument('-encode', action="store_true", 
-                        help='encode training data (does not train)')    
+                        help='build training data (does not train)')    
     parser.add_argument('-reset', action="store_true", 
                         help='re-build training data')    
     parser.add_argument('-device', type=str, default="auto", help='device')
@@ -62,11 +60,7 @@ if __name__ == "__main__" :
     if encoder_type == "bert":
         encoder = BERTEncoder(pretrained_weights=conf["pretrained_weights"], 
                               encoder_batchsize=conf.get("encoder_batch_size", 128), 
-                              device=device)
-    elif encoder_type == "clinicalbert":
-        encoder = ClinicalBertEncoder(
-                              encoder_batchsize=conf.get("encoder_batch_size", 128), 
-                              device=device)
+                              device=device)    
     elif encoder_type == "elmo":
         encoder = ELMoEncoder(pretrained_weights=conf["pretrained_weights"], 
                               encoder_batchsize=conf.get("encoder_batch_size", 128), 
@@ -88,9 +82,8 @@ if __name__ == "__main__" :
                 random_seed=conf["seed"], 
                 min_docs_user=conf.get("min_docs_user", 10),
                 max_docs_user=conf.get("max_docs_user"), 
-                reset=args.reset)
+                reset=args.reset)   
     
-    if args.encode:
         print("> encode")        
         encode_users(path=output_path, encoder=encoder,
                     window_size=conf["window_size"], reset=args.reset)        
